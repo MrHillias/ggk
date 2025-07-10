@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bluetooth Data Monitor</string>
+
+    <!-- Main Activity -->
+    <string name="tab_available_devices">Доступные устройства</string>
+    <string name="tab_connected_devices">Подключенные устройства</string>
+
+    <!-- Device Activity -->
+    <string name="tab_data">Данные</string>
+    <string name="tab_graph">График</string>
+
+    <!-- Status messages -->
+    <string name="status_initializing">Инициализация...</string>
+    <string name="status_connecting">Подключение...</string>
+    <string name="status_connected">Подключено</string>
+    <string name="status_disconnected">Отключено</string>
+    <string name="status_ready">Готов к приему данных</string>
+    <string name="status_processing">Обработка данных...</string>
+    <string name="status_saved">Данные сохранены</string>
+    <string name="action_settings">Настройки</string>
+
+    <!-- Buttons -->
+    <string name="btn_reconnect">Переподключиться</string>
+    <string name="btn_refresh">Обновить</string>
+
+    <!-- Labels -->
+    <string name="first_fragment_label">Доступные устройства</string>
+    <string name="second_fragment_label">Подключенные устройства</string>
+
+    <!-- Messages -->
+    <string name="msg_no_devices">Устройства не найдены</string>
+    <string name="msg_no_saved_devices">Нет сохраненных устройств</string>
+    <string name="msg_no_data">Нет данных для отображения</string>
+    <string name="msg_bluetooth_disabled">Bluetooth не включен</string>
+    <string name="msg_permissions_required">Все разрешения необходимы для работы приложения</string>
+    <string name="msg_error">Ошибка: %1$s</string>
+
+    <!-- Permissions -->
+    <string name="permission_bluetooth_required">Bluetooth разрешения необходимы</string>
+    <string name="permission_location_required">Разрешение на местоположение необходимо для поиска BLE устройств</string>
+</resources>

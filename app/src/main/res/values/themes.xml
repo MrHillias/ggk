@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme with Material 3 -->
+    <style name="Theme.Ggk" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Primary brand color -->
+        <item name="colorPrimary">#0061A4</item>
+        <item name="colorPrimaryVariant">#00315C</item>
+        <item name="colorOnPrimary">@color/white</item>
+
+        <!-- Secondary brand color -->
+        <item name="colorSecondary">#00696C</item>
+        <item name="colorSecondaryVariant">#00494C</item>
+        <item name="colorOnSecondary">@color/white</item>
+
+        <!-- Background colors -->
+        <item name="android:colorBackground">@color/white</item>
+        <item name="colorSurface">@color/white</item>
+        <item name="colorOnSurface">@color/black</item>
+
+        <!-- Error colors -->
+        <item name="colorError">#BA1A1A</item>
+        <item name="colorOnError">@color/white</item>
+
+        <!-- Status bar -->
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+
+        <!-- Remove action bar -->
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <!-- Theme overlays -->
+    <style name="ThemeOverlay.App.Toolbar" parent="">
+        <item name="colorControlNormal">@color/white</item>
+        <item name="colorControlHighlight">@color/white</item>
+    </style>
+</resources>

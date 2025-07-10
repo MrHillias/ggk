@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="8dp"
+    android:background="#F5F5F5"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/graph_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Давление"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="@color/black" />
+
+    <TextView
+        android:id="@+id/graph_units"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:text="мм рт.ст."
+        android:textSize="14sp"
+        android:textColor="#666666" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/graph_time_range"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="13:14 - 20:25"
+        android:textSize="12sp"
+        android:textColor="#999999" />
+
+</LinearLayout>

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Временной диапазон"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Информация о полном диапазоне -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Доступный диапазон: "
+            android:textSize="14sp"
+            android:textColor="#666666" />
+
+        <TextView
+            android:id="@+id/available_range_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="--"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Текущий выбранный диапазон -->
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        app:cardElevation="2dp"
+        app:cardCornerRadius="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Выбранный диапазон:"
+                android:textSize="12sp"
+                android:textColor="#999999" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="От:"
+                        android:textSize="12sp"
+                        android:textColor="#666666" />
+
+                    <TextView
+                        android:id="@+id/start_time_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:lineSpacingExtra="2dp" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="До:"
+                        android:textSize="12sp"
+                        android:textColor="#666666" />
+
+                    <TextView
+                        android:id="@+id/end_time_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="--"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:lineSpacingExtra="2dp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- RangeSlider для выбора диапазона -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Настройка диапазона:"
+        android:textSize="14sp"
+        android:layout_marginBottom="8dp" />
+
+    <com.google.android.material.slider.RangeSlider
+        android:id="@+id/time_range_slider"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:valueFrom="0"
+        android:valueTo="100"
+        app:values="@array/initial_slider_values"
+        app:labelBehavior="gone"
+        app:thumbColor="?attr/colorPrimary"
+        app:trackColorActive="?attr/colorPrimary"
+        app:trackColorInactive="#E0E0E0"
+        app:tickVisible="false" />
+
+    <!-- Количество выбранных точек -->
+    <TextView
+        android:id="@+id/selected_points_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Выбрано точек: 0"
+        android:textSize="14sp"
+        android:textColor="#666666"
+        android:lineSpacingExtra="3dp" />
+
+</LinearLayout>

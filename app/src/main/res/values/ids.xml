@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Menu item IDs -->
+    <item name="action_time_range" type="id"/>
+    <item name="action_display_mode" type="id"/>
+    <item name="available_range_text" type="id"/>
+    <item name="start_time_text" type="id"/>
+    <item name="end_time_text" type="id"/>
+    <item name="time_range_slider" type="id"/>
+    <item name="selected_points_text" type="id"/>
+</resources>

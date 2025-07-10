@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 color scheme - Blue theme with teal accents -->
+    <!-- Light theme colors -->
+    <color name="md_theme_primary">#0061A4</color>
+    <color name="md_theme_onPrimary">#FFFFFF</color>
+    <color name="md_theme_primaryContainer">#D1E4FF</color>
+    <color name="md_theme_onPrimaryContainer">#001D36</color>
+
+    <color name="md_theme_secondary">#00696C</color>
+    <color name="md_theme_onSecondary">#FFFFFF</color>
+    <color name="md_theme_secondaryContainer">#6FF6FA</color>
+    <color name="md_theme_onSecondaryContainer">#002021</color>
+
+    <color name="md_theme_tertiary">#5D5E72</color>
+    <color name="md_theme_onTertiary">#FFFFFF</color>
+    <color name="md_theme_tertiaryContainer">#E1E0F9</color>
+    <color name="md_theme_onTertiaryContainer">#191A2C</color>
+
+    <color name="md_theme_error">#BA1A1A</color>
+    <color name="md_theme_onError">#FFFFFF</color>
+    <color name="md_theme_errorContainer">#FFDAD6</color>
+    <color name="md_theme_onErrorContainer">#410002</color>
+
+    <color name="md_theme_background">#FDFCFF</color>
+    <color name="md_theme_onBackground">#1A1C1E</color>
+    <color name="md_theme_surface">#FDFCFF</color>
+    <color name="md_theme_onSurface">#1A1C1E</color>
+    <color name="md_theme_surfaceVariant">#DFE2EB</color>
+    <color name="md_theme_onSurfaceVariant">#43474E</color>
+
+    <color name="md_theme_outline">#73777F</color>
+    <color name="md_theme_outlineVariant">#C3C7CF</color>
+    <color name="md_theme_scrim">#000000</color>
+
+    <!-- Custom colors for specific UI elements -->
+    <color name="bluetooth_connected">#4CAF50</color>
+    <color name="bluetooth_disconnected">#F44336</color>
+    <color name="bluetooth_scanning">#2196F3</color>
+    <color name="data_received">#00BCD4</color>
+
+    <!-- Surface colors with elevation -->
+    <color name="surface_1">#F5F5F9</color>
+    <color name="surface_2">#EFEFF4</color>
+    <color name="surface_3">#E9E9EF</color>
+    <color name="surface_4">#E3E3EA</color>
+    <color name="surface_5">#DDDDE5</color>
+
+    <!-- Gradient colors -->
+    <color name="gradient_start">#0061A4</color>
+    <color name="gradient_end">#00BCD4</color>
+
+
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+</resources>
