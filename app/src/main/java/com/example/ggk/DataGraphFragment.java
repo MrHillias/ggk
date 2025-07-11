@@ -324,14 +324,14 @@ public class DataGraphFragment extends Fragment {
         lineChart.setPinchZoom(true);
         lineChart.setDrawGridBackground(false);
 
-        // Сбалансированные отступы для видимости меток
-        lineChart.setExtraBottomOffset(10f);   // Достаточно для меток времени
-        lineChart.setExtraLeftOffset(5f);      // Небольшой отступ слева
-        lineChart.setExtraRightOffset(10f);    // Отступ справа
-        lineChart.setExtraTopOffset(5f);       // Минимальный верхний отступ
+        // ВАЖНО: НЕ используем setViewPortOffsets - это обрезает метки!
+        // Вместо этого используем стандартные отступы графика
 
-        // Оптимальные offset для ViewPortHandler - увеличиваем для видимости меток
-        lineChart.setViewPortOffsets(45f, 20f, 20f, 45f); // left, top, right, bottom
+        // Базовые отступы - будут адаптироваться в displayChart()
+        lineChart.setExtraBottomOffset(15f);   // Для меток времени
+        lineChart.setExtraLeftOffset(20f);     // Увеличено для научной нотации
+        lineChart.setExtraRightOffset(15f);    // Отступ справа
+        lineChart.setExtraTopOffset(10f);      // Отступ сверху
 
         // Отключаем стандартное описание
         Description description = new Description();
@@ -344,24 +344,31 @@ public class DataGraphFragment extends Fragment {
         xAxis.setGranularity(1f);
         xAxis.setDrawLabels(true);
         xAxis.setYOffset(5f); // Небольшой отступ от оси
+        xAxis.setTextSize(10f); // Размер текста
 
         YAxis leftAxis = lineChart.getAxisLeft();
         leftAxis.setDrawGridLines(true);
         leftAxis.setDrawLabels(true);
-        leftAxis.setGranularity(0.1f);
-        leftAxis.setGranularityEnabled(true);
-        leftAxis.setXOffset(10f); // Отступ меток от оси
-
-        // Настройка ширины области меток
-        leftAxis.setMinWidth(35f);
-        leftAxis.setMaxWidth(45f);
-
-        // Убеждаемся, что метки рисуются
-        leftAxis.setDrawLabels(true);
+        leftAxis.setGranularityEnabled(false); // Отключаем, будем управлять в displayChart
+        leftAxis.setXOffset(15f); // Увеличенный отступ для научной нотации
+        leftAxis.setTextSize(10f); // Размер текста
         leftAxis.setDrawAxisLine(true);
+        leftAxis.setAxisLineWidth(1f);
+        leftAxis.setPosition(YAxis.YAxisLabelPosition.OUTSIDE_CHART);
+
+        // Убеждаемся, что есть место для меток
+        leftAxis.setSpaceTop(15f);
+        leftAxis.setSpaceBottom(15f);
+
+        // Минимальная и максимальная ширина для меток
+        leftAxis.setMinWidth(40f);  // Увеличено для научной нотации
+        leftAxis.setMaxWidth(60f);  // Увеличено для научной нотации
 
         YAxis rightAxis = lineChart.getAxisRight();
         rightAxis.setEnabled(false);
+
+        // Включаем легенду (опционально)
+        lineChart.getLegend().setEnabled(false);
     }
 
 
@@ -475,7 +482,7 @@ public class DataGraphFragment extends Fragment {
         xAxis.setAxisLineColor(getResources().getColor(R.color.black));
         xAxis.setGranularity(1f);
         xAxis.setAvoidFirstLastClipping(true);
-        xAxis.setTextSize(11f); // Достаточный размер для читаемости
+        xAxis.setTextSize(10f); // Размер для читаемости
         xAxis.setCenterAxisLabels(false);
         xAxis.setDrawLabels(true); // Убеждаемся, что метки рисуются
 
@@ -483,15 +490,16 @@ public class DataGraphFragment extends Fragment {
         leftAxis.setTextColor(getResources().getColor(R.color.black));
         leftAxis.setGridColor(Color.LTGRAY);
         leftAxis.setAxisLineColor(getResources().getColor(R.color.black));
-        leftAxis.setTextSize(11f); // Достаточный размер для читаемости
-
-        // Настройка позиции меток оси Y
+        leftAxis.setTextSize(10f); // Размер текста для читаемости
+        leftAxis.setDrawLabels(true); // ВАЖНО: включаем отображение меток
+        leftAxis.setEnabled(true); // ВАЖНО: включаем ось
+        leftAxis.setDrawAxisLine(true);
+        leftAxis.setDrawGridLines(true);
         leftAxis.setPosition(YAxis.YAxisLabelPosition.OUTSIDE_CHART);
-        leftAxis.setDrawLabels(true); // Убеждаемся, что метки рисуются
         leftAxis.setSpaceTop(15f);
         leftAxis.setSpaceBottom(15f);
 
-        // Определяем диапазон значений
+        // СНАЧАЛА определяем диапазон значений
         float minValue = Float.MAX_VALUE;
         float maxValue = Float.MIN_VALUE;
         for (Entry entry : dataEntries) {
@@ -499,54 +507,120 @@ public class DataGraphFragment extends Fragment {
             maxValue = Math.max(maxValue, entry.getY());
         }
 
-        // Интеллектуальный форматтер для оси Y
+        // ТЕПЕРЬ вычисляем range
+        float range = maxValue - minValue;
+
+        // Дополнительное пространство для меток при маленьких значениях
+        if (range < 0.01 || minValue < 0.01) {
+            lineChart.setExtraLeftOffset(25f);  // Еще больше места для научной нотации
+            leftAxis.setXOffset(15f);           // Больше отступ от оси
+            leftAxis.setTextSize(9f);           // Чуть меньше размер для компактности
+        } else {
+            lineChart.setExtraLeftOffset(10f);  // Стандартное место
+            leftAxis.setXOffset(10f);           // Стандартный отступ
+            leftAxis.setTextSize(10f);          // Стандартный размер
+        }
+
+        // Интеллектуальный форматтер для оси Y с поддержкой очень маленьких значений
         leftAxis.setValueFormatter(new ValueFormatter() {
             @Override
             public String getFormattedValue(float value) {
-                // Для целых чисел не показываем дробную часть
-                if (value == (int) value && Math.abs(value) < 1000) {
-                    return String.format(Locale.US, "%d", (int) value);
+                // Для нуля всегда показываем просто 0
+                if (Math.abs(value) < 0.0000001) {
+                    return "0";
                 }
-                // Для очень маленьких значений
-                else if (Math.abs(value) < 0.001 && value != 0) {
+                // Для очень маленьких значений (меньше 0.001) используем научную нотацию
+                else if (Math.abs(value) < 0.001) {
                     return String.format(Locale.US, "%.1e", value);
                 }
-                // Для маленьких значений
+                // Для маленьких значений (0.001 - 0.01)
+                else if (Math.abs(value) < 0.01) {
+                    return String.format(Locale.US, "%.4f", value);
+                }
+                // Для значений 0.01 - 0.1
                 else if (Math.abs(value) < 0.1) {
                     return String.format(Locale.US, "%.3f", value);
                 }
-                // Для средних значений
+                // Для значений 0.1 - 1
+                else if (Math.abs(value) < 1) {
+                    return String.format(Locale.US, "%.3f", value);
+                }
+                // Для значений 1 - 10
                 else if (Math.abs(value) < 10) {
                     return String.format(Locale.US, "%.2f", value);
                 }
-                // Для больших значений
-                else if (Math.abs(value) < 1000) {
+                // Для значений 10 - 100
+                else if (Math.abs(value) < 100) {
                     return String.format(Locale.US, "%.1f", value);
+                }
+                // Для значений 100 - 1000
+                else if (Math.abs(value) < 1000) {
+                    return String.format(Locale.US, "%.0f", value);
                 }
                 // Для очень больших значений
                 else {
-                    return String.format(Locale.US, "%.0f", value);
+                    return String.format(Locale.US, "%.0e", value);
                 }
             }
         });
 
-        // Умное количество меток на оси Y
-        int yLabelCount = 5; // Оптимальное количество
-        if (maxValue - minValue < 1) {
-            yLabelCount = 7; // Больше меток для маленького диапазона
+        // Адаптивное количество меток на оси Y в зависимости от диапазона
+        int yLabelCount;
+        if (range < 0.001) {
+            yLabelCount = 4; // Для очень маленьких диапазонов
+        } else if (range < 0.01) {
+            yLabelCount = 5;
+        } else if (range < 0.1) {
+            yLabelCount = 6;
+        } else if (range < 1) {
+            yLabelCount = 5;
+        } else {
+            yLabelCount = 5;
         }
+
+        // Убеждаемся, что минимум 3 метки всегда отображаются
+        if (yLabelCount < 3) {
+            yLabelCount = 3;
+        }
+
         leftAxis.setLabelCount(yLabelCount, false);
 
-        // Настройка диапазона с небольшими отступами
-        float range = maxValue - minValue;
+        // Настройка диапазона с адаптивными отступами
         if (range > 0) {
-            float padding = range * 0.1f;
+            // Для очень маленьких диапазонов используем больший отступ
+            float paddingPercent = range < 0.001 ? 0.5f : 0.1f;
+            float padding = range * paddingPercent;
+
+            // Минимальный отступ для очень маленьких значений
+            if (range < 0.001 && padding < 0.0001) {
+                padding = 0.0001f;
+            }
+
             leftAxis.setAxisMinimum(minValue - padding);
             leftAxis.setAxisMaximum(maxValue + padding);
         } else {
             // Если все значения одинаковые
-            leftAxis.setAxisMinimum(minValue - 1);
-            leftAxis.setAxisMaximum(maxValue + 1);
+            if (Math.abs(minValue) < 0.001) {
+                // Для очень маленьких значений
+                leftAxis.setAxisMinimum(minValue - 0.001f);
+                leftAxis.setAxisMaximum(maxValue + 0.001f);
+            } else if (Math.abs(minValue) < 1) {
+                // Для маленьких значений
+                leftAxis.setAxisMinimum(minValue * 0.5f);
+                leftAxis.setAxisMaximum(maxValue * 1.5f);
+            } else {
+                // Для обычных значений
+                leftAxis.setAxisMinimum(minValue - 1);
+                leftAxis.setAxisMaximum(maxValue + 1);
+            }
+        }
+
+        // Включаем автоматическую гранулярность для очень маленьких значений
+        if (range < 0.01) {
+            leftAxis.setGranularityEnabled(false);
+        } else {
+            leftAxis.setGranularityEnabled(true);
+            leftAxis.setGranularity(0.1f);
         }
 
         // Убеждаемся, что оси рисуются
