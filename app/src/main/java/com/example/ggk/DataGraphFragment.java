@@ -490,7 +490,6 @@ public class DataGraphFragment extends Fragment {
         leftAxis.setTextColor(getResources().getColor(R.color.black));
         leftAxis.setGridColor(Color.LTGRAY);
         leftAxis.setAxisLineColor(getResources().getColor(R.color.black));
-        leftAxis.setTextSize(10f); // Размер текста для читаемости
         leftAxis.setDrawLabels(true); // ВАЖНО: включаем отображение меток
         leftAxis.setEnabled(true); // ВАЖНО: включаем ось
         leftAxis.setDrawAxisLine(true);
@@ -510,50 +509,62 @@ public class DataGraphFragment extends Fragment {
         // ТЕПЕРЬ вычисляем range
         float range = maxValue - minValue;
 
-        // Дополнительное пространство для меток при маленьких значениях
-        if (range < 0.01 || minValue < 0.01) {
-            lineChart.setExtraLeftOffset(25f);  // Еще больше места для научной нотации
-            leftAxis.setXOffset(15f);           // Больше отступ от оси
-            leftAxis.setTextSize(9f);           // Чуть меньше размер для компактности
+        // Адаптивное пространство для меток и размер текста
+        if (range < 0.001 || maxValue < 0.001) {
+            // Для очень маленьких значений - научная нотация
+            lineChart.setExtraLeftOffset(35f);  // Больше места для научной нотации (например, 1.0e-3)
+            leftAxis.setXOffset(15f);
+            leftAxis.setTextSize(9f);
+        } else if (range < 0.1 || maxValue < 0.1) {
+            // Для маленьких значений как PSI (0.02) - компактный формат
+            lineChart.setExtraLeftOffset(20f);  // Умеренное пространство
+            leftAxis.setXOffset(10f);
+            leftAxis.setTextSize(9f);
+        } else if (range < 10) {
+            // Для средних значений
+            lineChart.setExtraLeftOffset(15f);
+            leftAxis.setXOffset(8f);
+            leftAxis.setTextSize(10f);
         } else {
-            lineChart.setExtraLeftOffset(10f);  // Стандартное место
-            leftAxis.setXOffset(10f);           // Стандартный отступ
-            leftAxis.setTextSize(10f);          // Стандартный размер
+            // Для больших значений
+            lineChart.setExtraLeftOffset(10f);
+            leftAxis.setXOffset(5f);
+            leftAxis.setTextSize(10f);
         }
 
-        // Интеллектуальный форматтер для оси Y с поддержкой очень маленьких значений
+        // Интеллектуальный форматтер для оси Y - упрощенный для компактности
         leftAxis.setValueFormatter(new ValueFormatter() {
             @Override
             public String getFormattedValue(float value) {
-                // Для нуля всегда показываем просто 0
+                // Для нуля
                 if (Math.abs(value) < 0.0000001) {
                     return "0";
                 }
-                // Для очень маленьких значений (меньше 0.001) используем научную нотацию
+                // Для очень маленьких значений - научная нотация
                 else if (Math.abs(value) < 0.001) {
-                    return String.format(Locale.US, "%.1e", value);
+                    return String.format(Locale.US, "%.0e", value); // Сокращенная научная нотация
                 }
-                // Для маленьких значений (0.001 - 0.01)
+                // Для маленьких значений типа PSI (0.001 - 0.1)
                 else if (Math.abs(value) < 0.01) {
-                    return String.format(Locale.US, "%.4f", value);
+                    return String.format(Locale.US, "%.3f", value); // Максимум 3 знака
                 }
-                // Для значений 0.01 - 0.1
                 else if (Math.abs(value) < 0.1) {
-                    return String.format(Locale.US, "%.3f", value);
+                    return String.format(Locale.US, "%.2f", value); // Максимум 2 знака
                 }
                 // Для значений 0.1 - 1
                 else if (Math.abs(value) < 1) {
-                    return String.format(Locale.US, "%.3f", value);
+                    return String.format(Locale.US, "%.1f", value);
                 }
                 // Для значений 1 - 10
                 else if (Math.abs(value) < 10) {
-                    return String.format(Locale.US, "%.2f", value);
+                    // Если целое число - без дробной части
+                    if (value == (int) value) {
+                        return String.format(Locale.US, "%d", (int) value);
+                    } else {
+                        return String.format(Locale.US, "%.1f", value);
+                    }
                 }
-                // Для значений 10 - 100
-                else if (Math.abs(value) < 100) {
-                    return String.format(Locale.US, "%.1f", value);
-                }
-                // Для значений 100 - 1000
+                // Для больших значений
                 else if (Math.abs(value) < 1000) {
                     return String.format(Locale.US, "%.0f", value);
                 }
@@ -564,60 +575,64 @@ public class DataGraphFragment extends Fragment {
             }
         });
 
-        // Адаптивное количество меток на оси Y в зависимости от диапазона
+        // Адаптивное количество меток на оси Y
         int yLabelCount;
         if (range < 0.001) {
-            yLabelCount = 4; // Для очень маленьких диапазонов
+            yLabelCount = 3; // Минимум меток для очень маленьких диапазонов
         } else if (range < 0.01) {
-            yLabelCount = 5;
+            yLabelCount = 4;
         } else if (range < 0.1) {
-            yLabelCount = 6;
-        } else if (range < 1) {
             yLabelCount = 5;
         } else {
             yLabelCount = 5;
-        }
-
-        // Убеждаемся, что минимум 3 метки всегда отображаются
-        if (yLabelCount < 3) {
-            yLabelCount = 3;
         }
 
         leftAxis.setLabelCount(yLabelCount, false);
 
         // Настройка диапазона с адаптивными отступами
         if (range > 0) {
-            // Для очень маленьких диапазонов используем больший отступ
-            float paddingPercent = range < 0.001 ? 0.5f : 0.1f;
-            float padding = range * paddingPercent;
-
-            // Минимальный отступ для очень маленьких значений
-            if (range < 0.001 && padding < 0.0001) {
-                padding = 0.0001f;
+            // Адаптивный отступ
+            float paddingPercent;
+            if (range < 0.001) {
+                paddingPercent = 0.5f; // 50% для очень маленьких
+            } else if (range < 0.01) {
+                paddingPercent = 0.3f; // 30% для маленьких
+            } else if (range < 0.1) {
+                paddingPercent = 0.2f; // 20% для средне-маленьких
+            } else {
+                paddingPercent = 0.1f; // 10% для обычных
             }
+
+            float padding = range * paddingPercent;
 
             leftAxis.setAxisMinimum(minValue - padding);
             leftAxis.setAxisMaximum(maxValue + padding);
         } else {
             // Если все значения одинаковые
             if (Math.abs(minValue) < 0.001) {
-                // Для очень маленьких значений
                 leftAxis.setAxisMinimum(minValue - 0.001f);
                 leftAxis.setAxisMaximum(maxValue + 0.001f);
+            } else if (Math.abs(minValue) < 0.1) {
+                leftAxis.setAxisMinimum(minValue * 0.8f);
+                leftAxis.setAxisMaximum(maxValue * 1.2f);
             } else if (Math.abs(minValue) < 1) {
-                // Для маленьких значений
                 leftAxis.setAxisMinimum(minValue * 0.5f);
                 leftAxis.setAxisMaximum(maxValue * 1.5f);
             } else {
-                // Для обычных значений
                 leftAxis.setAxisMinimum(minValue - 1);
                 leftAxis.setAxisMaximum(maxValue + 1);
             }
         }
 
-        // Включаем автоматическую гранулярность для очень маленьких значений
-        if (range < 0.01) {
+        // Гранулярность для разных диапазонов
+        if (range < 0.001) {
             leftAxis.setGranularityEnabled(false);
+        } else if (range < 0.01) {
+            leftAxis.setGranularityEnabled(true);
+            leftAxis.setGranularity(0.001f);
+        } else if (range < 0.1) {
+            leftAxis.setGranularityEnabled(true);
+            leftAxis.setGranularity(0.01f);
         } else {
             leftAxis.setGranularityEnabled(true);
             leftAxis.setGranularity(0.1f);
