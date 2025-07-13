@@ -14,6 +14,8 @@ public class DeviceActivity extends AppCompatActivity {
     private String deviceAddress;
     private String deviceName;
     private boolean isFromHistory;
+    private boolean isSyncMode;
+    private long lastSyncTime;
 
     private TabLayout tabLayout;
     private ViewPager2 viewPager;
@@ -28,6 +30,8 @@ public class DeviceActivity extends AppCompatActivity {
         deviceAddress = getIntent().getStringExtra("DEVICE_ADDRESS");
         deviceName = getIntent().getStringExtra("DEVICE_NAME");
         isFromHistory = getIntent().getBooleanExtra("IS_FROM_HISTORY", false);
+        isSyncMode = getIntent().getBooleanExtra("SYNC_MODE", false);
+        lastSyncTime = getIntent().getLongExtra("LAST_SYNC_TIME", 0);
 
         if (deviceAddress == null || deviceName == null) {
             Toast.makeText(this, "Ошибка: не переданы данные устройства", Toast.LENGTH_SHORT).show();
@@ -36,7 +40,7 @@ public class DeviceActivity extends AppCompatActivity {
         }
 
         // Устанавливаем заголовок
-        setTitle(deviceName);
+        setTitle(deviceName + (isSyncMode ? " - Синхронизация" : ""));
 
         // Включаем кнопку "назад" в ActionBar
         if (getSupportActionBar() != null) {
@@ -92,6 +96,14 @@ public class DeviceActivity extends AppCompatActivity {
 
     public boolean isFromHistory() {
         return isFromHistory;
+    }
+
+    public boolean isSyncMode() {
+        return isSyncMode;
+    }
+
+    public long getLastSyncTime() {
+        return lastSyncTime;
     }
 
     // Метод для обновления графика после получения данных

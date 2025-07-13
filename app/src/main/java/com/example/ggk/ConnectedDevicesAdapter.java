@@ -3,6 +3,8 @@ package com.example.ggk;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -52,6 +54,7 @@ public class ConnectedDevicesAdapter extends ListAdapter<ConnectedDevicesFragmen
         private final ImageButton optionsButton;
         private final ImageView deviceIcon;
         private final View iconBackground;
+        private final TextView statusChip;
 
         DeviceViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -62,6 +65,7 @@ public class ConnectedDevicesAdapter extends ListAdapter<ConnectedDevicesFragmen
             optionsButton = itemView.findViewById(R.id.options_button);
             deviceIcon = itemView.findViewById(R.id.device_icon);
             iconBackground = itemView.findViewById(R.id.icon_background);
+            statusChip = itemView.findViewById(R.id.status_chip);
 
             itemView.setOnClickListener(v -> {
                 int position = getAdapterPosition();
@@ -104,6 +108,19 @@ public class ConnectedDevicesAdapter extends ListAdapter<ConnectedDevicesFragmen
             } else {
                 iconBackground.setBackgroundResource(R.drawable.circle_background);
             }
+
+            // Показываем статус доступности
+            if (device.isAvailable) {
+                statusChip.setVisibility(View.VISIBLE);
+                statusChip.setText("В сети");
+                statusChip.setBackgroundResource(R.drawable.chip_background_available);
+                statusChip.setTextColor(itemView.getContext().getResources().getColor(R.color.white));
+            } else {
+                statusChip.setVisibility(View.VISIBLE);
+                statusChip.setText("Не в сети");
+                statusChip.setBackgroundResource(R.drawable.chip_background_unavailable);
+                statusChip.setTextColor(itemView.getContext().getResources().getColor(R.color.chip_text_unavailable));
+            }
         }
     }
 
@@ -120,7 +137,8 @@ public class ConnectedDevicesAdapter extends ListAdapter<ConnectedDevicesFragmen
             return oldItem.folderName.equals(newItem.folderName) &&
                     oldItem.getDisplayName().equals(newItem.getDisplayName()) &&
                     oldItem.lastModified == newItem.lastModified &&
-                    oldItem.dataSize == newItem.dataSize;
+                    oldItem.dataSize == newItem.dataSize &&
+                    oldItem.isAvailable == newItem.isAvailable;
         }
     }
 }

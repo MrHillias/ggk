@@ -103,6 +103,9 @@ public class BluetoothService {
     private volatile UUID currentCharacteristicUuid;
     private volatile String currentDeviceAddress;
 
+    public void setSyncMode(boolean b, long lastSyncTime) {
+    }
+
     public interface BluetoothCallback {
         void onConnectionStateChange(boolean connected);
         void onServicesDiscovered(boolean success);

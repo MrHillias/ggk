@@ -53,6 +53,7 @@ public class DataTransferFragment extends Fragment {
     private View statsContainer;
     private View statusIndicator;
     private View lowerSection;
+    private TextView syncInfoView;
 
     private BluetoothService bluetoothService;
     private Handler mainHandler;
@@ -64,6 +65,11 @@ public class DataTransferFragment extends Fragment {
     private boolean isFromHistory;
     private String deviceAddress;
     private String deviceName;
+    private boolean isSyncMode;
+    private long lastSyncTime;
+    private long syncStartTime;
+    private int expectedDataPoints = 0;
+    private int receivedDataPoints = 0;
 
     private AtomicBoolean autoScroll = new AtomicBoolean(true);
     private boolean dataStarted = false;
@@ -82,6 +88,8 @@ public class DataTransferFragment extends Fragment {
             deviceAddress = activity.getDeviceAddress();
             deviceName = activity.getDeviceName();
             isFromHistory = activity.isFromHistory();
+            isSyncMode = activity.isSyncMode();
+            lastSyncTime = activity.getLastSyncTime();
         }
     }
 
@@ -103,6 +111,15 @@ public class DataTransferFragment extends Fragment {
         statsContainer = view.findViewById(R.id.stats_container);
         statusIndicator = view.findViewById(R.id.status_indicator);
         lowerSection = view.findViewById(R.id.lower_section);
+
+        // Добавляем информацию о режиме синхронизации
+        if (isSyncMode && statusView != null) {
+            syncInfoView = new TextView(getContext());
+            syncInfoView.setTextSize(12);
+            syncInfoView.setPadding(16, 8, 16, 8);
+            ViewGroup parent = (ViewGroup) statusView.getParent();
+            parent.addView(syncInfoView, parent.indexOfChild(statusView) + 1);
+        }
 
         reconnectButton.setOnClickListener(v -> connectToDevice());
 
@@ -134,6 +151,12 @@ public class DataTransferFragment extends Fragment {
     private void initializeBluetooth() {
         bluetoothService = new BluetoothService(requireContext());
         bluetoothService.setCallback(bluetoothCallback);
+
+        // Если режим синхронизации, включаем специальный режим
+        if (isSyncMode) {
+            bluetoothService.setSyncMode(true, lastSyncTime);
+        }
+
         connectToDevice();
     }
 
@@ -168,6 +191,11 @@ public class DataTransferFragment extends Fragment {
                 updateStatusIndicator(R.color.bluetooth_connected);
                 showProgress(false);
                 statsContainer.setVisibility(View.VISIBLE);
+
+                if (isSyncMode) {
+                    syncStartTime = System.currentTimeMillis();
+                    calculateExpectedDataPoints();
+                }
             } else {
                 updateStatus("Отключено");
                 updateStatusIndicator(R.color.bluetooth_disconnected);
@@ -225,6 +253,19 @@ public class DataTransferFragment extends Fragment {
             }
 
             if (dataStarted) {
+                // В режиме синхронизации подсчитываем полученные точки
+                if (isSyncMode) {
+                    receivedDataPoints = countDataPointsInBuffer(dataBuffer.toString());
+                    updateSyncInfo();
+
+                    // Если получили нужное количество данных, останавливаем
+                    if (receivedDataPoints >= expectedDataPoints && expectedDataPoints > 0) {
+                        Log.d(TAG, "Received enough data points: " + receivedDataPoints + "/" + expectedDataPoints);
+                        processReceivedData();
+                        return;
+                    }
+                }
+
                 // Отображаем только данные после Start в нижнем окне
                 textView.setText(dataBuffer.toString());
             } else {
@@ -256,6 +297,45 @@ public class DataTransferFragment extends Fragment {
         }
     };
 
+    private void calculateExpectedDataPoints() {
+        if (!isSyncMode || lastSyncTime == 0) {
+            return;
+        }
+
+        // Рассчитываем сколько секунд прошло с последней синхронизации
+        long timeDiff = syncStartTime - lastSyncTime;
+        expectedDataPoints = (int) (timeDiff / 1000); // Одна точка в секунду
+
+        Log.d(TAG, "Expected data points to sync: " + expectedDataPoints);
+        updateSyncInfo();
+    }
+
+    private void updateSyncInfo() {
+        if (syncInfoView != null && isSyncMode) {
+            String info = String.format("Режим докачки: получено %d из %d точек",
+                    receivedDataPoints, expectedDataPoints);
+            syncInfoView.setText(info);
+        }
+    }
+
+    private int countDataPointsInBuffer(String data) {
+        // Подсчитываем количество чисел в буфере
+        String[] lines = data.split("\n");
+        int count = 0;
+        for (String line : lines) {
+            line = line.trim();
+            if (!line.isEmpty()) {
+                String[] parts = line.split("\\s+");
+                for (String part : parts) {
+                    if (isNumeric(part)) {
+                        count++;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
     private void processReceivedData() {
         if (dataBuffer.length() == 0) {
             return;
@@ -274,8 +354,18 @@ public class DataTransferFragment extends Fragment {
         // Парсим числовые данные
         parseNumericData(data);
 
+        // В режиме синхронизации обрезаем лишние данные
+        if (isSyncMode && expectedDataPoints > 0 && numericData.size() > expectedDataPoints) {
+            numericData = numericData.subList(0, expectedDataPoints);
+            Log.d(TAG, "Trimmed data to " + expectedDataPoints + " points");
+        }
+
         // Сохраняем в файлы
-        saveDataToFiles();
+        if (isSyncMode) {
+            appendDataToFiles();
+        } else {
+            saveDataToFiles();
+        }
 
         // Отключаемся
         if (bluetoothService != null) {
@@ -319,6 +409,41 @@ public class DataTransferFragment extends Fragment {
         }
     }
 
+    private void appendDataToFiles() {
+        try {
+            // Создаем папку для устройства если её нет
+            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+            if (!deviceFolder.exists()) {
+                deviceFolder.mkdirs();
+            }
+
+            // Добавляем данные в data.txt
+            File dataFile = new File(deviceFolder, "data.txt");
+            try (FileWriter writer = new FileWriter(dataFile, true)) { // true для дописывания
+                // Реверсируем список данных
+                Collections.reverse(numericData);
+
+                // Вычисляем временные метки начиная с последнего времени синхронизации
+                SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+                long currentTime = lastSyncTime + 1000; // Начинаем со следующей секунды
+
+                for (int i = 0; i < numericData.size(); i++) {
+                    long timestamp = currentTime + (i * 1000L);
+                    String time = sdf.format(new Date(timestamp));
+                    writer.write(numericData.get(i) + ";" + time + "\n");
+                }
+            }
+
+            Toast.makeText(getContext(), "Докачано " + numericData.size() + " новых измерений",
+                    Toast.LENGTH_LONG).show();
+
+        } catch (IOException e) {
+            Log.e(TAG, "Ошибка добавления данных в файл", e);
+            Toast.makeText(getContext(), "Ошибка сохранения: " + e.getMessage(),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void saveDataToFiles() {
         try {
             // Создаем папку для устройства
@@ -327,8 +452,9 @@ public class DataTransferFragment extends Fragment {
                 deviceFolder.mkdirs();
             }
 
-            // Сохраняем адрес устройства
+            // ВАЖНО: Сохраняем MAC адрес устройства
             DeviceInfoHelper.saveDeviceAddress(requireContext(), deviceName, deviceAddress);
+            Log.d(TAG, "Saved device address: " + deviceAddress + " for device: " + deviceName);
 
             // Сохраняем info.txt
             File infoFile = new File(deviceFolder, "info.txt");

@@ -38,6 +38,7 @@
     <color name="bluetooth_disconnected">#F44336</color>
     <color name="bluetooth_scanning">#2196F3</color>
     <color name="data_received">#00BCD4</color>
+    <color name="chip_text_unavailable">#666666</color>
 
     <!-- Surface colors with elevation -->
     <color name="surface_1">#F5F5F9</color>

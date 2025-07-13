@@ -1,10 +1,22 @@
 package com.example.ggk;
 
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -28,10 +40,18 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
+@SuppressLint("MissingPermission")
 public class ConnectedDevicesFragment extends Fragment {
+    private static final String TAG = "ConnectedDevicesFragment";
+    private static final long SCAN_INTERVAL = 10000; // Сканирование каждые 10 секунд
+    private static final long SCAN_DURATION = 5000; // Длительность сканирования 5 секунд
 
     private RecyclerView recyclerView;
     private View emptyView;
@@ -40,6 +60,41 @@ public class ConnectedDevicesFragment extends Fragment {
     private List<DeviceInfo> allDevices;
     private List<DeviceInfo> filteredDevices;
     private String searchQuery = "";
+
+    private BluetoothAdapter bluetoothAdapter;
+    private Handler scanHandler;
+    private boolean isScanning = false;
+    private Set<String> availableDeviceAddresses = new HashSet<>();
+    private Map<String, String> deviceNameMap = new HashMap<>(); // MAC адрес -> Имя устройства
+
+    private final BroadcastReceiver scanReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+
+            if (BluetoothDevice.ACTION_FOUND.equals(action)) {
+                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (device != null) {
+                    String address = device.getAddress();
+                    String name = device.getName();
+
+                    // Добавляем в список доступных устройств
+                    availableDeviceAddresses.add(address);
+
+                    // Сохраняем имя устройства
+                    if (name != null && !name.isEmpty()) {
+                        deviceNameMap.put(address, name);
+                    }
+
+                    // Обновляем UI
+                    updateDeviceAvailability();
+                }
+            } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                isScanning = false;
+                Log.d(TAG, "Scan finished. Found devices: " + availableDeviceAddresses.size());
+            }
+        }
+    };
 
     @Nullable
     @Override
@@ -53,6 +108,12 @@ public class ConnectedDevicesFragment extends Fragment {
 
         allDevices = new ArrayList<>();
         filteredDevices = new ArrayList<>();
+        scanHandler = new Handler(Looper.getMainLooper());
+
+        // Получаем Bluetooth адаптер
+        BluetoothManager bluetoothManager = (BluetoothManager) requireContext()
+                .getSystemService(Context.BLUETOOTH_SERVICE);
+        bluetoothAdapter = bluetoothManager.getAdapter();
 
         adapter = new ConnectedDevicesAdapter(
                 new ConnectedDevicesAdapter.OnDeviceClickListener() {
@@ -98,7 +159,142 @@ public class ConnectedDevicesFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+
+        // Регистрируем приемник для сканирования
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothDevice.ACTION_FOUND);
+        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+        requireContext().registerReceiver(scanReceiver, filter);
+
         refreshDeviceList();
+
+        // Начинаем периодическое сканирование
+        startPeriodicScanning();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+
+        // Останавливаем сканирование
+        stopPeriodicScanning();
+
+        // Отменяем регистрацию приемника
+        try {
+            requireContext().unregisterReceiver(scanReceiver);
+        } catch (IllegalArgumentException ignored) {}
+    }
+
+    private void startPeriodicScanning() {
+        // Первое сканирование сразу
+        startBluetoothScan();
+
+        // Планируем периодические сканирования
+        scanHandler.postDelayed(scanRunnable, SCAN_INTERVAL);
+    }
+
+    private void stopPeriodicScanning() {
+        scanHandler.removeCallbacks(scanRunnable);
+
+        if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
+            bluetoothAdapter.cancelDiscovery();
+        }
+    }
+
+    private final Runnable scanRunnable = new Runnable() {
+        @Override
+        public void run() {
+            startBluetoothScan();
+            scanHandler.postDelayed(this, SCAN_INTERVAL);
+        }
+    };
+
+    private void startBluetoothScan() {
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.w(TAG, "Bluetooth not available or not enabled");
+            return;
+        }
+
+        if (isScanning) {
+            Log.d(TAG, "Already scanning");
+            return;
+        }
+
+        // Очищаем список доступных устройств перед новым сканированием
+        availableDeviceAddresses.clear();
+
+        // Сначала добавляем все сопряженные устройства как доступные
+        try {
+            Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+            for (BluetoothDevice device : pairedDevices) {
+                availableDeviceAddresses.add(device.getAddress());
+                if (device.getName() != null) {
+                    deviceNameMap.put(device.getAddress(), device.getName());
+                }
+                Log.d(TAG, "Added paired device: " + device.getName() + " (" + device.getAddress() + ")");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting paired devices", e);
+        }
+
+        // Отменяем предыдущее сканирование, если оно еще идет
+        if (bluetoothAdapter.isDiscovering()) {
+            bluetoothAdapter.cancelDiscovery();
+        }
+
+        // Начинаем новое сканирование
+        isScanning = true;
+        boolean started = bluetoothAdapter.startDiscovery();
+        Log.d(TAG, "Bluetooth scan started: " + started);
+
+        // Сразу обновляем доступность для сопряженных устройств
+        updateDeviceAvailability();
+
+        // Автоматически останавливаем сканирование через SCAN_DURATION
+        scanHandler.postDelayed(() -> {
+            if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
+                bluetoothAdapter.cancelDiscovery();
+            }
+        }, SCAN_DURATION);
+    }
+
+    private void updateDeviceAvailability() {
+        // Обновляем статус доступности для всех устройств
+        boolean hasChanges = false;
+
+        for (DeviceInfo device : allDevices) {
+            boolean wasAvailable = device.isAvailable;
+
+            // Проверяем доступность по MAC адресу (приводим к верхнему регистру для сравнения)
+            String deviceMac = device.address.toUpperCase();
+            boolean isNowAvailable = false;
+
+            for (String availableMac : availableDeviceAddresses) {
+                if (availableMac.toUpperCase().equals(deviceMac)) {
+                    isNowAvailable = true;
+                    break;
+                }
+            }
+
+            device.isAvailable = isNowAvailable;
+
+            // Если устройство стало доступным, обновляем его имя из Bluetooth
+            if (device.isAvailable && deviceNameMap.containsKey(device.address)) {
+                device.bluetoothName = deviceNameMap.get(device.address);
+            }
+
+            // Логируем изменения статуса
+            if (wasAvailable != device.isAvailable) {
+                Log.d(TAG, "Device " + device.getDisplayName() + " (" + device.address +
+                        ") availability changed to: " + device.isAvailable);
+                hasChanges = true;
+            }
+        }
+
+        // Обновляем UI только если были изменения
+        if (hasChanges || filteredDevices.isEmpty()) {
+            filterDevices();
+        }
     }
 
     public void refreshDeviceList() {
@@ -115,9 +311,14 @@ public class ConnectedDevicesFragment extends Fragment {
                     info.folderName = file.getName();
                     info.originalName = file.getName();
                     info.customName = loadCustomName(file);
-                    info.address = DeviceInfoHelper.getDeviceAddress(requireContext(), file.getName());
+
+                    // Загружаем MAC адрес устройства
+                    String savedAddress = DeviceInfoHelper.getDeviceAddress(requireContext(), file.getName());
+                    info.address = savedAddress != null ? savedAddress : file.getName();
+
                     info.lastModified = file.lastModified();
                     info.folder = file;
+                    info.isAvailable = false; // По умолчанию недоступно
 
                     // Получаем размер данных
                     File dataFile = new File(file, "data.txt");
@@ -126,6 +327,9 @@ public class ConnectedDevicesFragment extends Fragment {
                     }
 
                     allDevices.add(info);
+
+                    Log.d(TAG, "Loaded device: " + info.getDisplayName() +
+                            " with MAC: " + info.address);
                 }
             }
         }
@@ -215,9 +419,18 @@ public class ConnectedDevicesFragment extends Fragment {
         PopupMenu popupMenu = new PopupMenu(requireContext(), anchor);
         popupMenu.getMenuInflater().inflate(R.menu.device_options_menu, popupMenu.getMenu());
 
+        // Показываем пункт "Докачать данные" только для доступных устройств
+        MenuItem syncItem = popupMenu.getMenu().findItem(R.id.action_sync);
+        if (syncItem != null) {
+            syncItem.setVisible(device.isAvailable);
+        }
+
         popupMenu.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
-            if (itemId == R.id.action_rename) {
+            if (itemId == R.id.action_sync) {
+                startDataSync(device);
+                return true;
+            } else if (itemId == R.id.action_rename) {
                 showRenameDialog(device);
                 return true;
             } else if (itemId == R.id.action_delete) {
@@ -231,6 +444,76 @@ public class ConnectedDevicesFragment extends Fragment {
         });
 
         popupMenu.show();
+    }
+
+    private void startDataSync(DeviceInfo device) {
+        // Показываем диалог подтверждения
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Докачать данные")
+                .setMessage("Начать синхронизацию новых данных с устройства \"" +
+                        device.getDisplayName() + "\"?")
+                .setPositiveButton("Начать", (dialog, which) -> {
+                    // Открываем DeviceActivity в режиме синхронизации
+                    Intent intent = new Intent(getContext(), DeviceActivity.class);
+                    intent.putExtra("DEVICE_ADDRESS", device.address);
+                    intent.putExtra("DEVICE_NAME", device.getDisplayName());
+                    intent.putExtra("IS_FROM_HISTORY", false);
+                    intent.putExtra("SYNC_MODE", true);
+                    intent.putExtra("LAST_SYNC_TIME", getLastSyncTime(device));
+                    startActivity(intent);
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private long getLastSyncTime(DeviceInfo device) {
+        // Получаем время последней записи из data.txt
+        File dataFile = new File(device.folder, "data.txt");
+        if (!dataFile.exists()) {
+            return 0;
+        }
+
+        String lastLine = null;
+        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(dataFile, "r")) {
+            long fileLength = file.length() - 1;
+            StringBuilder sb = new StringBuilder();
+
+            for (long filePointer = fileLength; filePointer != -1; filePointer--) {
+                file.seek(filePointer);
+                int readByte = file.readByte();
+
+                if (readByte == 0xA) { // LF
+                    if (filePointer < fileLength) {
+                        lastLine = sb.reverse().toString();
+                        break;
+                    }
+                } else if (readByte != 0xD) { // Ignore CR
+                    sb.append((char) readByte);
+                }
+            }
+
+            if (lastLine == null && sb.length() > 0) {
+                lastLine = sb.reverse().toString();
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Error reading last line from data file", e);
+            return 0;
+        }
+
+        if (lastLine != null && lastLine.contains(";")) {
+            String[] parts = lastLine.split(";");
+            if (parts.length >= 2) {
+                try {
+                    SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+                    Date date = sdf.parse(parts[1].trim());
+                    return date != null ? date.getTime() : 0;
+                } catch (Exception e) {
+                    Log.e(TAG, "Error parsing date from last line", e);
+                }
+            }
+        }
+
+        return 0;
     }
 
     private void showRenameDialog(DeviceInfo device) {
@@ -294,6 +577,12 @@ public class ConnectedDevicesFragment extends Fragment {
         info.append("Последнее обновление: ").append(formatDateTime(device.lastModified)).append("\n");
         info.append("Точек данных: ").append(device.dataSize).append("\n");
 
+        // Добавляем информацию о доступности
+        info.append("Статус: ").append(device.isAvailable ? "В зоне видимости" : "Вне зоны видимости").append("\n");
+        if (device.isAvailable && device.bluetoothName != null) {
+            info.append("Bluetooth имя: ").append(device.bluetoothName).append("\n");
+        }
+
         // Размер папки
         long folderSize = getFolderSize(device.folder);
         info.append("Размер данных: ").append(formatFileSize(folderSize));
@@ -336,6 +625,8 @@ public class ConnectedDevicesFragment extends Fragment {
         long lastModified;
         int dataSize;
         File folder;
+        boolean isAvailable = false; // Доступно ли устройство в данный момент
+        String bluetoothName; // Текущее имя устройства в Bluetooth
 
         public String getDisplayName() {
             return customName != null && !customName.isEmpty() ? customName : originalName;
