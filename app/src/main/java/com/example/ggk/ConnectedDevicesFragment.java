@@ -78,6 +78,8 @@ public class ConnectedDevicesFragment extends Fragment {
                     String address = device.getAddress();
                     String name = device.getName();
 
+                    Log.d(TAG, "Found device: " + name + " (" + address + ")");
+
                     // Добавляем в список доступных устройств
                     availableDeviceAddresses.add(address);
 
@@ -92,6 +94,17 @@ public class ConnectedDevicesFragment extends Fragment {
             } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
                 isScanning = false;
                 Log.d(TAG, "Scan finished. Found devices: " + availableDeviceAddresses.size());
+
+                // Выводим все найденные устройства
+                for (String mac : availableDeviceAddresses) {
+                    Log.d(TAG, "Available device MAC: " + mac);
+                }
+
+                // Выводим все сохраненные устройства
+                for (DeviceInfo device : allDevices) {
+                    Log.d(TAG, "Saved device: " + device.getDisplayName() +
+                            " MAC: " + device.address + " Available: " + device.isAvailable);
+                }
             }
         }
     };
@@ -164,6 +177,7 @@ public class ConnectedDevicesFragment extends Fragment {
         IntentFilter filter = new IntentFilter();
         filter.addAction(BluetoothDevice.ACTION_FOUND);
         filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
         requireContext().registerReceiver(scanReceiver, filter);
 
         refreshDeviceList();

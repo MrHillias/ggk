@@ -103,8 +103,9 @@ public class BluetoothService {
     private volatile UUID currentCharacteristicUuid;
     private volatile String currentDeviceAddress;
 
-    public void setSyncMode(boolean b, long lastSyncTime) {
-    }
+    // Режим синхронизации
+    private boolean syncMode = false;
+    private long lastSyncTime = 0;
 
     public interface BluetoothCallback {
         void onConnectionStateChange(boolean connected);
@@ -134,6 +135,13 @@ public class BluetoothService {
 
         // Запускаем периодическую обработку буфера
         scheduleBufferProcessing();
+    }
+
+    // Установка режима синхронизации
+    public void setSyncMode(boolean enabled, long lastSyncTime) {
+        this.syncMode = enabled;
+        this.lastSyncTime = lastSyncTime;
+        Log.d(TAG, "Sync mode set to: " + enabled + ", last sync time: " + lastSyncTime);
     }
 
     private void scheduleBufferProcessing() {
