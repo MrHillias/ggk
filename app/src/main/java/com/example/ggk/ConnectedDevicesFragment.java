@@ -88,6 +88,17 @@ public class ConnectedDevicesFragment extends Fragment {
                         deviceNameMap.put(address, name);
                     }
 
+                    // Логируем для отладки
+                    Log.d(TAG, "Available devices count: " + availableDeviceAddresses.size());
+                    for (DeviceInfo savedDevice : allDevices) {
+                        String normalizedSaved = normalizeMacAddress(savedDevice.address);
+                        String normalizedFound = normalizeMacAddress(address);
+                        if (normalizedSaved.equals(normalizedFound)) {
+                            Log.d(TAG, "MATCH FOUND! Device: " + savedDevice.getDisplayName() +
+                                    " Saved MAC: " + savedDevice.address + " Found MAC: " + address);
+                        }
+                    }
+
                     // Обновляем UI
                     updateDeviceAvailability();
                 }
@@ -276,25 +287,29 @@ public class ConnectedDevicesFragment extends Fragment {
         // Обновляем статус доступности для всех устройств
         boolean hasChanges = false;
 
+        // Создаем нормализованный набор доступных MAC адресов
+        Set<String> normalizedAvailableAddresses = new HashSet<>();
+        for (String mac : availableDeviceAddresses) {
+            normalizedAvailableAddresses.add(normalizeMacAddress(mac));
+        }
+
         for (DeviceInfo device : allDevices) {
             boolean wasAvailable = device.isAvailable;
 
-            // Проверяем доступность по MAC адресу (приводим к верхнему регистру для сравнения)
-            String deviceMac = device.address.toUpperCase();
-            boolean isNowAvailable = false;
-
-            for (String availableMac : availableDeviceAddresses) {
-                if (availableMac.toUpperCase().equals(deviceMac)) {
-                    isNowAvailable = true;
-                    break;
-                }
-            }
-
-            device.isAvailable = isNowAvailable;
+            // Нормализуем MAC адрес устройства для сравнения
+            String normalizedDeviceMac = normalizeMacAddress(device.address);
+            device.isAvailable = normalizedAvailableAddresses.contains(normalizedDeviceMac);
 
             // Если устройство стало доступным, обновляем его имя из Bluetooth
-            if (device.isAvailable && deviceNameMap.containsKey(device.address)) {
-                device.bluetoothName = deviceNameMap.get(device.address);
+            if (device.isAvailable) {
+                // Ищем оригинальный MAC адрес в deviceNameMap
+                for (String mac : availableDeviceAddresses) {
+                    if (normalizeMacAddress(mac).equals(normalizedDeviceMac) &&
+                            deviceNameMap.containsKey(mac)) {
+                        device.bluetoothName = deviceNameMap.get(mac);
+                        break;
+                    }
+                }
             }
 
             // Логируем изменения статуса
@@ -370,7 +385,24 @@ public class ConnectedDevicesFragment extends Fragment {
             }
         }
 
-        adapter.submitList(new ArrayList<>(filteredDevices));
+        // ВАЖНО: Создаем новый список для адаптера, чтобы DiffUtil увидел изменения
+        List<DeviceInfo> newList = new ArrayList<>();
+        for (DeviceInfo device : filteredDevices) {
+            // Создаем копию объекта для обновления UI
+            DeviceInfo copy = new DeviceInfo();
+            copy.folderName = device.folderName;
+            copy.originalName = device.originalName;
+            copy.customName = device.customName;
+            copy.address = device.address;
+            copy.lastModified = device.lastModified;
+            copy.dataSize = device.dataSize;
+            copy.folder = device.folder;
+            copy.isAvailable = device.isAvailable;
+            copy.bluetoothName = device.bluetoothName;
+            newList.add(copy);
+        }
+
+        adapter.submitList(newList);
         updateEmptyState();
     }
 
@@ -528,6 +560,12 @@ public class ConnectedDevicesFragment extends Fragment {
         }
 
         return 0;
+    }
+
+    private String normalizeMacAddress(String mac) {
+        if (mac == null) return "";
+        // Убираем все разделители и приводим к верхнему регистру
+        return mac.replaceAll("[:-]", "").toUpperCase();
     }
 
     private void showRenameDialog(DeviceInfo device) {
