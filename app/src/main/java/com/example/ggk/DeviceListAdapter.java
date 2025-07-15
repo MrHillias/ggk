@@ -2,6 +2,7 @@ package com.example.ggk;
 
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothDevice;
+import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,6 +12,8 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
+
+import java.io.File;
 
 public class DeviceListAdapter extends ListAdapter<DeviceListAdapter.DeviceItem, DeviceListAdapter.DeviceViewHolder> {
 
@@ -63,16 +66,50 @@ public class DeviceListAdapter extends ListAdapter<DeviceListAdapter.DeviceItem,
             if (name == null || name.isEmpty()) {
                 name = "Неизвестное устройство";
             }
+
+            // Проверяем, есть ли сохраненные данные для этого устройства
+            boolean hasData = checkIfHasData(item.getAddress(), name);
+
             deviceName.setText(name);
             deviceAddress.setText(item.getAddress());
 
-            // Показываем статус для сопряженных устройств
-            if (item.isPaired()) {
+            // Показываем статус
+            if (hasData) {
+                statusChip.setVisibility(View.VISIBLE);
+                statusChip.setText("Есть данные");
+                statusChip.setBackgroundResource(R.drawable.chip_background_available);
+            } else if (item.isPaired()) {
                 statusChip.setVisibility(View.VISIBLE);
                 statusChip.setText("Сопряжено");
+                statusChip.setBackgroundResource(R.drawable.chip_background);
             } else {
                 statusChip.setVisibility(View.GONE);
             }
+        }
+
+        private boolean checkIfHasData(String address, String name) {
+            Context context = itemView.getContext();
+            File appDir = context.getFilesDir();
+            File[] files = appDir.listFiles();
+
+            if (files != null) {
+                for (File file : files) {
+                    if (file.isDirectory()) {
+                        // Проверяем по MAC-адресу
+                        String savedAddress = DeviceInfoHelper.getDeviceAddress(context, file.getName());
+                        if (savedAddress != null && savedAddress.equalsIgnoreCase(address)) {
+                            return true;
+                        }
+
+                        // Также проверяем по имени
+                        if (file.getName().equals(name)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
         }
     }
 

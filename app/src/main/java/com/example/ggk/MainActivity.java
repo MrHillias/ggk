@@ -143,4 +143,14 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra("IS_FROM_HISTORY", isFromHistory);
         startActivity(intent);
     }
+
+    public void openDeviceDetailsForSync(String deviceAddress, String deviceName, long lastSyncTime) {
+        Intent intent = new Intent(this, DeviceActivity.class);
+        intent.putExtra("DEVICE_ADDRESS", deviceAddress);
+        intent.putExtra("DEVICE_NAME", deviceName);
+        intent.putExtra("IS_FROM_HISTORY", false);
+        intent.putExtra("SYNC_MODE", true);
+        intent.putExtra("LAST_SYNC_TIME", lastSyncTime);
+        startActivity(intent);
+    }
 }

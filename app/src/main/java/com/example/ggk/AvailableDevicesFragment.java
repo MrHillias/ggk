@@ -24,13 +24,20 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import java.io.File;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 @SuppressLint("MissingPermission")
 public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLayout.OnRefreshListener {
+    private static final String TAG = "AvailableDevicesFragment";
 
     private BluetoothAdapter bluetoothAdapter;
     private DeviceListAdapter adapter;
@@ -95,14 +102,8 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
                 bluetoothAdapter.cancelDiscovery();
             }
 
-            MainActivity mainActivity = (MainActivity) getActivity();
-            if (mainActivity != null) {
-                mainActivity.openDeviceDetails(
-                        device.getAddress(),
-                        device.getName(),
-                        false
-                );
-            }
+            // Проверяем, есть ли уже сохраненные данные для этого устройства
+            checkExistingDataAndProceed(device);
         });
 
         recyclerView.setAdapter(adapter);
@@ -143,12 +144,12 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
     }
 
     private void refreshDeviceList() {
-        Log.d("AvailableDevices", "refreshDeviceList called");
+        Log.d(TAG, "refreshDeviceList called");
 
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
             swipeRefreshLayout.setRefreshing(false);
             Toast.makeText(getContext(), "Bluetooth не включен", Toast.LENGTH_SHORT).show();
-            Log.e("AvailableDevices", "Bluetooth not enabled");
+            Log.e(TAG, "Bluetooth not enabled");
             return;
         }
 
@@ -158,7 +159,7 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
 
         // Показываем сопряженные устройства
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-        Log.d("AvailableDevices", "Paired devices: " + pairedDevices.size());
+        Log.d(TAG, "Paired devices: " + pairedDevices.size());
         for (BluetoothDevice device : pairedDevices) {
             addDeviceToList(device, true);
         }
@@ -169,11 +170,11 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
         }
 
         boolean started = bluetoothAdapter.startDiscovery();
-        Log.d("AvailableDevices", "Discovery started: " + started);
+        Log.d(TAG, "Discovery started: " + started);
     }
 
     private void addDeviceToList(BluetoothDevice device, boolean isPaired) {
-        Log.d("AvailableDevices", "Adding device: " + device.getAddress() + " paired: " + isPaired);
+        Log.d(TAG, "Adding device: " + device.getAddress() + " paired: " + isPaired);
 
         DeviceListAdapter.DeviceItem item = new DeviceListAdapter.DeviceItem(device, isPaired);
         deviceList.add(item);
@@ -181,11 +182,150 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
         mainHandler.post(() -> {
             adapter.submitList(new ArrayList<>(deviceList));
             updateEmptyState();
-            Log.d("AvailableDevices", "List updated, size: " + deviceList.size());
+            Log.d(TAG, "List updated, size: " + deviceList.size());
         });
     }
 
     private void updateEmptyState() {
         emptyState.setVisibility(deviceList.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    private void checkExistingDataAndProceed(DeviceListAdapter.DeviceItem device) {
+        // Проверяем все папки в директории приложения
+        File appDir = requireContext().getFilesDir();
+        File[] files = appDir.listFiles();
+
+        String existingFolderName = null;
+        long lastSyncTime = 0;
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    // Проверяем по MAC-адресу
+                    String savedAddress = DeviceInfoHelper.getDeviceAddress(requireContext(), file.getName());
+                    if (savedAddress != null && savedAddress.equalsIgnoreCase(device.getAddress())) {
+                        existingFolderName = file.getName();
+                        // Получаем время последней записи
+                        lastSyncTime = getLastDataTime(file);
+                        break;
+                    }
+
+                    // Также проверяем по имени устройства
+                    if (file.getName().equals(device.getName())) {
+                        existingFolderName = file.getName();
+                        lastSyncTime = getLastDataTime(file);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (existingFolderName != null) {
+            // Данные уже есть, спрашиваем пользователя
+            showDataExistsDialog(device, existingFolderName, lastSyncTime);
+        } else {
+            // Данных нет, сразу подключаемся
+            connectToDevice(device, false, 0);
+        }
+    }
+
+    private void showDataExistsDialog(DeviceListAdapter.DeviceItem device, String existingFolderName, long lastSyncTime) {
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Данные уже существуют")
+                .setMessage("Для этого устройства уже есть сохраненные данные. Что вы хотите сделать?")
+                .setPositiveButton("Скачать только новые", (dialog, which) -> {
+                    // Докачка новых данных
+                    connectToDevice(device, true, lastSyncTime);
+                })
+                .setNeutralButton("Скачать все заново", (dialog, which) -> {
+                    // Удаляем старые данные и качаем заново
+                    deleteExistingData(existingFolderName);
+                    connectToDevice(device, false, 0);
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void deleteExistingData(String folderName) {
+        File deviceFolder = new File(requireContext().getFilesDir(), folderName);
+        if (deviceFolder.exists()) {
+            File[] files = deviceFolder.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    file.delete();
+                }
+            }
+            deviceFolder.delete();
+        }
+    }
+
+    private long getLastDataTime(File deviceFolder) {
+        File dataFile = new File(deviceFolder, "data.txt");
+        if (!dataFile.exists()) {
+            return 0;
+        }
+
+        String lastLine = null;
+        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(dataFile, "r")) {
+            long fileLength = file.length() - 1;
+            StringBuilder sb = new StringBuilder();
+
+            for (long filePointer = fileLength; filePointer != -1; filePointer--) {
+                file.seek(filePointer);
+                int readByte = file.readByte();
+
+                if (readByte == 0xA) { // LF
+                    if (filePointer < fileLength) {
+                        lastLine = sb.reverse().toString();
+                        break;
+                    }
+                } else if (readByte != 0xD) { // Ignore CR
+                    sb.append((char) readByte);
+                }
+            }
+
+            if (lastLine == null && sb.length() > 0) {
+                lastLine = sb.reverse().toString();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading last line from data file", e);
+            return 0;
+        }
+
+        if (lastLine != null && lastLine.contains(";")) {
+            String[] parts = lastLine.split(";");
+            if (parts.length >= 2) {
+                try {
+                    SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+                    Date date = sdf.parse(parts[1].trim());
+                    return date != null ? date.getTime() : 0;
+                } catch (Exception e) {
+                    Log.e(TAG, "Error parsing date from last line", e);
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private void connectToDevice(DeviceListAdapter.DeviceItem device, boolean syncMode, long lastSyncTime) {
+        MainActivity mainActivity = (MainActivity) getActivity();
+        if (mainActivity != null) {
+            if (syncMode) {
+                // Режим синхронизации
+                mainActivity.openDeviceDetailsForSync(
+                        device.getAddress(),
+                        device.getName(),
+                        lastSyncTime
+                );
+            } else {
+                // Обычное подключение
+                mainActivity.openDeviceDetails(
+                        device.getAddress(),
+                        device.getName(),
+                        false
+                );
+            }
+        }
     }
 }
