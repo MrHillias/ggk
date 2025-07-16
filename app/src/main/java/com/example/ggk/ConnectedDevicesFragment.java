@@ -145,9 +145,10 @@ public class ConnectedDevicesFragment extends Fragment {
                     public void onDeviceClick(DeviceInfo device) {
                         MainActivity mainActivity = (MainActivity) getActivity();
                         if (mainActivity != null) {
-                            mainActivity.openDeviceDetails(
+                            mainActivity.openDeviceDetailsWithFolder(
                                     device.address,
                                     device.getDisplayName(),
+                                    device.folderName,  // Передаем имя папки
                                     true
                             );
                         }

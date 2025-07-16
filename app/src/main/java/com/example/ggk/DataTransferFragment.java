@@ -65,6 +65,7 @@ public class DataTransferFragment extends Fragment {
     private boolean isFromHistory;
     private String deviceAddress;
     private String deviceName;
+    private String deviceFolderName;
     private boolean isSyncMode;
     private long lastSyncTime;
     private long syncStartTime;
@@ -87,6 +88,7 @@ public class DataTransferFragment extends Fragment {
         if (activity != null) {
             deviceAddress = activity.getDeviceAddress();
             deviceName = activity.getDeviceName();
+            deviceFolderName = activity.getDeviceFolderName(); // Добавить
             isFromHistory = activity.isFromHistory();
             isSyncMode = activity.isSyncMode();
             lastSyncTime = activity.getLastSyncTime();
@@ -412,7 +414,7 @@ public class DataTransferFragment extends Fragment {
     private void appendDataToFiles() {
         try {
             // Создаем папку для устройства если её нет
-            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceFolderName));
             if (!deviceFolder.exists()) {
                 deviceFolder.mkdirs();
             }
@@ -447,14 +449,14 @@ public class DataTransferFragment extends Fragment {
     private void saveDataToFiles() {
         try {
             // Создаем папку для устройства
-            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceFolderName));
             if (!deviceFolder.exists()) {
                 deviceFolder.mkdirs();
             }
 
             // ВАЖНО: Сохраняем MAC адрес устройства
-            DeviceInfoHelper.saveDeviceAddress(requireContext(), deviceName, deviceAddress);
-            Log.d(TAG, "Saved device address: " + deviceAddress + " for device: " + deviceName);
+            DeviceInfoHelper.saveDeviceAddress(requireContext(), deviceFolderName, deviceAddress);
+            Log.d(TAG, "Saved device address: " + deviceAddress + " for device: " + deviceFolderName);
 
             // Сохраняем info.txt
             File infoFile = new File(deviceFolder, "info.txt");
@@ -491,7 +493,7 @@ public class DataTransferFragment extends Fragment {
 
     private void loadDataFromFiles() {
         try {
-            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceFolderName));
 
             // Загружаем info.txt в верхнее окно
             File infoFile = new File(deviceFolder, "info.txt");

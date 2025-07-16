@@ -13,6 +13,7 @@ public class DeviceActivity extends AppCompatActivity {
 
     private String deviceAddress;
     private String deviceName;
+    private String deviceFolderName;
     private boolean isFromHistory;
     private boolean isSyncMode;
     private long lastSyncTime;
@@ -29,14 +30,14 @@ public class DeviceActivity extends AppCompatActivity {
         // Получаем данные из Intent
         deviceAddress = getIntent().getStringExtra("DEVICE_ADDRESS");
         deviceName = getIntent().getStringExtra("DEVICE_NAME");
+        deviceFolderName = getIntent().getStringExtra("DEVICE_FOLDER_NAME");
         isFromHistory = getIntent().getBooleanExtra("IS_FROM_HISTORY", false);
         isSyncMode = getIntent().getBooleanExtra("SYNC_MODE", false);
         lastSyncTime = getIntent().getLongExtra("LAST_SYNC_TIME", 0);
 
-        if (deviceAddress == null || deviceName == null) {
-            Toast.makeText(this, "Ошибка: не переданы данные устройства", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
+        // Если имя папки не передано, используем имя устройства
+        if (deviceFolderName == null) {
+            deviceFolderName = deviceName;
         }
 
         // Устанавливаем заголовок
@@ -55,7 +56,7 @@ public class DeviceActivity extends AppCompatActivity {
     }
 
     private void setupTabs() {
-        pagerAdapter = new DevicePagerAdapter(this, deviceAddress, deviceName, isFromHistory);
+        pagerAdapter = new DevicePagerAdapter(this, deviceAddress, deviceName, deviceFolderName, isFromHistory);
         viewPager.setAdapter(pagerAdapter);
 
         new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
@@ -85,7 +86,9 @@ public class DeviceActivity extends AppCompatActivity {
         onBackPressed();
         return true;
     }
-
+    public String getDeviceFolderName() {
+        return deviceFolderName;
+    }
     public String getDeviceAddress() {
         return deviceAddress;
     }

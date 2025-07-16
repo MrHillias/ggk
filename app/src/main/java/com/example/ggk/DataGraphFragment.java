@@ -53,6 +53,8 @@ public class DataGraphFragment extends Fragment {
     private TextView yAxisUnitsTextView;
     private TextView xAxisLabelTextView;
 
+    private String deviceFolderName;
+
     private PressureUnit currentUnit = PressureUnit.PA;
     private Button btnUnits;
 
@@ -87,6 +89,12 @@ public class DataGraphFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_data_graph, container, false);
+
+        DeviceActivity activity = (DeviceActivity) getActivity();
+        if (activity != null) {
+            deviceName = activity.getDeviceName();
+            deviceFolderName = activity.getDeviceFolderName();
+        }
 
         lineChart = view.findViewById(R.id.line_chart);
         emptyView = view.findViewById(R.id.empty_view);
@@ -722,7 +730,7 @@ public class DataGraphFragment extends Fragment {
         allDataPoints.clear();
 
         try {
-            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceFolderName));
             File dataFile = new File(deviceFolder, "data.txt");
 
             if (!dataFile.exists()) {
@@ -829,7 +837,7 @@ public class DataGraphFragment extends Fragment {
 
     public boolean hasDataForGraph() {
         try {
-            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+            File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceFolderName));
             File dataFile = new File(deviceFolder, "data.txt");
             return dataFile.exists() && dataFile.length() > 0;
         } catch (Exception e) {

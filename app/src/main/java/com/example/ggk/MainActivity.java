@@ -127,6 +127,26 @@ public class MainActivity extends AppCompatActivity {
         }).attach();
     }
 
+    public void openDeviceDetailsWithFolder(String deviceAddress, String deviceName, String deviceFolderName, boolean isFromHistory) {
+        Intent intent = new Intent(this, DeviceActivity.class);
+        intent.putExtra("DEVICE_ADDRESS", deviceAddress);
+        intent.putExtra("DEVICE_NAME", deviceName);
+        intent.putExtra("DEVICE_FOLDER_NAME", deviceFolderName);
+        intent.putExtra("IS_FROM_HISTORY", isFromHistory);
+        startActivity(intent);
+    }
+
+    public void openDeviceDetailsForSyncWithFolder(String deviceAddress, String deviceName, String deviceFolderName, long lastSyncTime) {
+        Intent intent = new Intent(this, DeviceActivity.class);
+        intent.putExtra("DEVICE_ADDRESS", deviceAddress);
+        intent.putExtra("DEVICE_NAME", deviceName);
+        intent.putExtra("DEVICE_FOLDER_NAME", deviceFolderName);
+        intent.putExtra("IS_FROM_HISTORY", false);
+        intent.putExtra("SYNC_MODE", true);
+        intent.putExtra("LAST_SYNC_TIME", lastSyncTime);
+        startActivity(intent);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();

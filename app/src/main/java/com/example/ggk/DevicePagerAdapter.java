@@ -9,16 +9,18 @@ public class DevicePagerAdapter extends FragmentStateAdapter {
 
     private final String deviceAddress;
     private final String deviceName;
+    private final String deviceFolderName;
     private final boolean isFromHistory;
 
     private DataTransferFragment dataTransferFragment;
     private DataGraphFragment dataGraphFragment;
 
     public DevicePagerAdapter(@NonNull FragmentActivity fragmentActivity,
-                              String deviceAddress, String deviceName, boolean isFromHistory) {
+                              String deviceAddress, String deviceName, String deviceFolderName, boolean isFromHistory) {
         super(fragmentActivity);
         this.deviceAddress = deviceAddress;
         this.deviceName = deviceName;
+        this.deviceFolderName = deviceFolderName;
         this.isFromHistory = isFromHistory;
     }
 

@@ -312,10 +312,12 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
         MainActivity mainActivity = (MainActivity) getActivity();
         if (mainActivity != null) {
             if (syncMode) {
-                // Режим синхронизации
-                mainActivity.openDeviceDetailsForSync(
+                // Режим синхронизации - нужно найти имя папки
+                String folderName = findDeviceFolderName(device);
+                mainActivity.openDeviceDetailsForSyncWithFolder(
                         device.getAddress(),
                         device.getName(),
+                        folderName,
                         lastSyncTime
                 );
             } else {
@@ -327,5 +329,29 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
                 );
             }
         }
+    }
+
+    private String findDeviceFolderName(DeviceListAdapter.DeviceItem device) {
+        File appDir = requireContext().getFilesDir();
+        File[] files = appDir.listFiles();
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    // Проверяем по MAC-адресу
+                    String savedAddress = DeviceInfoHelper.getDeviceAddress(requireContext(), file.getName());
+                    if (savedAddress != null && savedAddress.equalsIgnoreCase(device.getAddress())) {
+                        return file.getName();
+                    }
+
+                    // Также проверяем по имени устройства
+                    if (file.getName().equals(device.getName())) {
+                        return file.getName();
+                    }
+                }
+            }
+        }
+
+        return device.getName(); // По умолчанию возвращаем имя устройства
     }
 }
