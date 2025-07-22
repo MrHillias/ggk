@@ -12,7 +12,7 @@
         android:background="@android:color/transparent"
         app:elevation="0dp">
 
-        <!-- Search bar -->
+        <!-- Search bar with scan indicator -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -46,6 +46,31 @@
                     android:inputType="text"
                     android:maxLines="1"
                     android:textSize="16sp" />
+
+                <!-- Scan indicator -->
+                <FrameLayout
+                    android:id="@+id/scan_indicator_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:visibility="gone">
+
+                    <ProgressBar
+                        android:id="@+id/scan_progress"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:indeterminateTint="?attr/colorPrimary"
+                        style="?android:attr/progressBarStyle" />
+
+                    <ImageView
+                        android:id="@+id/scan_complete_icon"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@drawable/ic_bluetooth_searching"
+                        app:tint="?attr/colorPrimary"
+                        android:visibility="gone" />
+
+                </FrameLayout>
 
             </LinearLayout>
 

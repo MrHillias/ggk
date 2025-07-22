@@ -152,7 +152,11 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // Обновляем список подключенных устройств при возврате к экрану
         if (pagerAdapter != null && pagerAdapter.getConnectedDevicesFragment() != null) {
-            pagerAdapter.getConnectedDevicesFragment().refreshDeviceList();
+            ConnectedDevicesFragment fragment = pagerAdapter.getConnectedDevicesFragment();
+            // Обновляем список устройств
+            fragment.refreshDeviceList();
+            // Запускаем сканирование для обновления статусов
+            fragment.startBluetoothScanPublic();
         }
     }
 

@@ -54,6 +54,7 @@ public class DataTransferFragment extends Fragment {
     private View statusIndicator;
     private View lowerSection;
     private TextView syncInfoView;
+    private TextView syncTimeRangeView;
 
     private BluetoothService bluetoothService;
     private Handler mainHandler;
@@ -71,6 +72,8 @@ public class DataTransferFragment extends Fragment {
     private long syncStartTime;
     private int expectedDataPoints = 0;
     private int receivedDataPoints = 0;
+    private Date syncStartDate;
+    private Date syncEndDate;
 
     private AtomicBoolean autoScroll = new AtomicBoolean(true);
     private boolean dataStarted = false;
@@ -116,11 +119,20 @@ public class DataTransferFragment extends Fragment {
 
         // Добавляем информацию о режиме синхронизации
         if (isSyncMode && statusView != null) {
+            ViewGroup statusCard = view.findViewById(R.id.status_card);
+
+            // Создаем контейнер для информации о синхронизации
             syncInfoView = new TextView(getContext());
             syncInfoView.setTextSize(12);
-            syncInfoView.setPadding(16, 8, 16, 8);
-            ViewGroup parent = (ViewGroup) statusView.getParent();
-            parent.addView(syncInfoView, parent.indexOfChild(statusView) + 1);
+            syncInfoView.setPadding(32, 4, 32, 0);
+            statusCard.addView(syncInfoView);
+
+            // Создаем TextView для отображения временного диапазона
+            syncTimeRangeView = new TextView(getContext());
+            syncTimeRangeView.setTextSize(11);
+            syncTimeRangeView.setPadding(32, 2, 32, 4);
+            syncTimeRangeView.setTextColor(getResources().getColor(R.color.md_theme_primary));
+            statusCard.addView(syncTimeRangeView);
         }
 
         reconnectButton.setOnClickListener(v -> connectToDevice());
@@ -308,8 +320,13 @@ public class DataTransferFragment extends Fragment {
         long timeDiff = syncStartTime - lastSyncTime;
         expectedDataPoints = (int) (timeDiff / 1000); // Одна точка в секунду
 
+        // Вычисляем временной диапазон
+        syncStartDate = new Date(lastSyncTime + 1000); // Начинаем со следующей секунды после последней синхронизации
+        syncEndDate = new Date(syncStartTime);
+
         Log.d(TAG, "Expected data points to sync: " + expectedDataPoints);
         updateSyncInfo();
+        updateSyncTimeRange();
     }
 
     private void updateSyncInfo() {
@@ -317,6 +334,16 @@ public class DataTransferFragment extends Fragment {
             String info = String.format("Режим докачки: получено %d из %d точек",
                     receivedDataPoints, expectedDataPoints);
             syncInfoView.setText(info);
+        }
+    }
+
+    private void updateSyncTimeRange() {
+        if (syncTimeRangeView != null && isSyncMode && syncStartDate != null && syncEndDate != null) {
+            SimpleDateFormat sdf = new SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault());
+            String timeRange = String.format("Период: %s - %s",
+                    sdf.format(syncStartDate),
+                    sdf.format(syncEndDate));
+            syncTimeRangeView.setText(timeRange);
         }
     }
 
@@ -436,8 +463,11 @@ public class DataTransferFragment extends Fragment {
                 }
             }
 
-            Toast.makeText(getContext(), "Докачано " + numericData.size() + " новых измерений",
-                    Toast.LENGTH_LONG).show();
+            String message = String.format("Докачано %d новых измерений\n%s",
+                    numericData.size(),
+                    syncTimeRangeView != null ? syncTimeRangeView.getText() : "");
+
+            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
 
         } catch (IOException e) {
             Log.e(TAG, "Ошибка добавления данных в файл", e);

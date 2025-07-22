@@ -26,9 +26,13 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -176,7 +180,15 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
     private void addDeviceToList(BluetoothDevice device, boolean isPaired) {
         Log.d(TAG, "Adding device: " + device.getAddress() + " paired: " + isPaired);
 
+        // Создаем элемент с исходным именем устройства
         DeviceListAdapter.DeviceItem item = new DeviceListAdapter.DeviceItem(device, isPaired);
+
+        // Проверяем, есть ли пользовательское имя для этого устройства
+        String customName = getCustomNameForDevice(device.getAddress());
+        if (customName != null) {
+            item.setCustomName(customName);
+        }
+
         deviceList.add(item);
 
         mainHandler.post(() -> {
@@ -184,6 +196,40 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
             updateEmptyState();
             Log.d(TAG, "List updated, size: " + deviceList.size());
         });
+    }
+
+    // Получение пользовательского имени устройства
+    private String getCustomNameForDevice(String address) {
+        File appDir = requireContext().getFilesDir();
+        File[] files = appDir.listFiles();
+
+        if (files != null) {
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    // Проверяем по MAC-адресу
+                    String savedAddress = DeviceInfoHelper.getDeviceAddress(requireContext(), file.getName());
+                    if (savedAddress != null && savedAddress.equalsIgnoreCase(address)) {
+                        // Проверяем наличие файла с пользовательским именем
+                        File customNameFile = new File(file, "custom_name.txt");
+                        if (customNameFile.exists()) {
+                            try {
+                                BufferedReader reader = new BufferedReader(new FileReader(customNameFile));
+                                String customName = reader.readLine();
+                                reader.close();
+                                if (customName != null && !customName.trim().isEmpty()) {
+                                    return customName.trim();
+                                }
+                            } catch (IOException e) {
+                                Log.e(TAG, "Error reading custom name", e);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private void updateEmptyState() {
@@ -311,12 +357,15 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
     private void connectToDevice(DeviceListAdapter.DeviceItem device, boolean syncMode, long lastSyncTime) {
         MainActivity mainActivity = (MainActivity) getActivity();
         if (mainActivity != null) {
+            // Используем отображаемое имя (пользовательское или оригинальное)
+            String displayName = device.getDisplayName();
+
             if (syncMode) {
                 // Режим синхронизации - нужно найти имя папки
                 String folderName = findDeviceFolderName(device);
                 mainActivity.openDeviceDetailsForSyncWithFolder(
                         device.getAddress(),
-                        device.getName(),
+                        displayName,
                         folderName,
                         lastSyncTime
                 );
@@ -324,7 +373,7 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
                 // Обычное подключение
                 mainActivity.openDeviceDetails(
                         device.getAddress(),
-                        device.getName(),
+                        displayName,
                         false
                 );
             }

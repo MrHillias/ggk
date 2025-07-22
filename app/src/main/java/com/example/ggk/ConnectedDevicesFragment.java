@@ -20,7 +20,9 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.PopupMenu;
+import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -60,6 +62,11 @@ public class ConnectedDevicesFragment extends Fragment {
     private List<DeviceInfo> allDevices;
     private List<DeviceInfo> filteredDevices;
     private String searchQuery = "";
+
+    // Элементы для индикации сканирования
+    private View scanIndicatorContainer;
+    private ProgressBar scanProgress;
+    private ImageView scanCompleteIcon;
 
     private BluetoothAdapter bluetoothAdapter;
     private Handler scanHandler;
@@ -102,8 +109,13 @@ public class ConnectedDevicesFragment extends Fragment {
                     // Обновляем UI
                     updateDeviceAvailability();
                 }
+            } else if (BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)) {
+                isScanning = true;
+                showScanIndicator(true);
+                Log.d(TAG, "Scan started");
             } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
                 isScanning = false;
+                showScanIndicator(false);
                 Log.d(TAG, "Scan finished. Found devices: " + availableDeviceAddresses.size());
 
                 // Выводим все найденные устройства
@@ -129,6 +141,11 @@ public class ConnectedDevicesFragment extends Fragment {
         recyclerView = view.findViewById(R.id.devices_recycler_view);
         emptyView = view.findViewById(R.id.empty_view);
         searchEditText = view.findViewById(R.id.search_edit_text);
+
+        // Инициализация элементов индикации сканирования
+        scanIndicatorContainer = view.findViewById(R.id.scan_indicator_container);
+        scanProgress = view.findViewById(R.id.scan_progress);
+        scanCompleteIcon = view.findViewById(R.id.scan_complete_icon);
 
         allDevices = new ArrayList<>();
         filteredDevices = new ArrayList<>();
@@ -196,6 +213,9 @@ public class ConnectedDevicesFragment extends Fragment {
 
         // Начинаем периодическое сканирование
         startPeriodicScanning();
+
+        // Сразу запускаем сканирование для обновления статусов
+        startBluetoothScan();
     }
 
     @Override
@@ -211,9 +231,36 @@ public class ConnectedDevicesFragment extends Fragment {
         } catch (IllegalArgumentException ignored) {}
     }
 
-    private void startPeriodicScanning() {
-        // Первое сканирование сразу
+    private void showScanIndicator(boolean scanning) {
+        if (scanIndicatorContainer != null) {
+            scanIndicatorContainer.setVisibility(View.VISIBLE);
+
+            if (scanning) {
+                scanProgress.setVisibility(View.VISIBLE);
+                scanCompleteIcon.setVisibility(View.GONE);
+            } else {
+                // Показываем галочку на секунду после завершения сканирования
+                scanProgress.setVisibility(View.GONE);
+                scanCompleteIcon.setVisibility(View.VISIBLE);
+
+                // Скрываем индикатор через 1 секунду
+                scanHandler.postDelayed(() -> {
+                    if (scanIndicatorContainer != null) {
+                        scanIndicatorContainer.setVisibility(View.GONE);
+                    }
+                }, 1000);
+            }
+        }
+    }
+
+    // Публичный метод для запуска сканирования из MainActivity
+    public void startBluetoothScanPublic() {
         startBluetoothScan();
+    }
+
+    private void startPeriodicScanning() {
+        // Очищаем предыдущие задачи
+        scanHandler.removeCallbacks(scanRunnable);
 
         // Планируем периодические сканирования
         scanHandler.postDelayed(scanRunnable, SCAN_INTERVAL);

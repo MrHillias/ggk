@@ -62,13 +62,14 @@ public class DeviceListAdapter extends ListAdapter<DeviceListAdapter.DeviceItem,
 
         @SuppressLint("MissingPermission")
         void bind(DeviceItem item) {
-            String name = item.getName();
+            // Используем отображаемое имя (пользовательское или оригинальное)
+            String name = item.getDisplayName();
             if (name == null || name.isEmpty()) {
                 name = "Неизвестное устройство";
             }
 
             // Проверяем, есть ли сохраненные данные для этого устройства
-            boolean hasData = checkIfHasData(item.getAddress(), name);
+            boolean hasData = checkIfHasData(item.getAddress(), item.getName());
 
             deviceName.setText(name);
             deviceAddress.setText(item.getAddress());
@@ -116,14 +117,28 @@ public class DeviceListAdapter extends ListAdapter<DeviceListAdapter.DeviceItem,
     public static class DeviceItem {
         private final BluetoothDevice device;
         private final boolean isPaired;
+        private String customName;
 
         public DeviceItem(BluetoothDevice device, boolean isPaired) {
             this.device = device;
             this.isPaired = isPaired;
         }
 
+        public void setCustomName(String customName) {
+            this.customName = customName;
+        }
+
         @SuppressLint("MissingPermission")
         public String getName() {
+            return device.getName();
+        }
+
+        // Получаем отображаемое имя (пользовательское или оригинальное)
+        @SuppressLint("MissingPermission")
+        public String getDisplayName() {
+            if (customName != null && !customName.isEmpty()) {
+                return customName;
+            }
             return device.getName();
         }
 
@@ -148,8 +163,13 @@ public class DeviceListAdapter extends ListAdapter<DeviceListAdapter.DeviceItem,
 
         @Override
         public boolean areContentsTheSame(@NonNull DeviceItem oldItem, @NonNull DeviceItem newItem) {
+            String oldName = oldItem.customName != null ? oldItem.customName : oldItem.getName();
+            String newName = newItem.customName != null ? newItem.customName : newItem.getName();
+
             return oldItem.getAddress().equals(newItem.getAddress()) &&
-                    oldItem.isPaired() == newItem.isPaired();
+                    oldItem.isPaired() == newItem.isPaired() &&
+                    ((oldName == null && newName == null) ||
+                            (oldName != null && oldName.equals(newName)));
         }
     }
 }
