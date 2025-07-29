@@ -53,4 +53,8 @@ public class DevicePagerAdapter extends FragmentStateAdapter {
     public int getItemCount() {
         return 3; // Всегда 3 вкладки для всех устройств
     }
+
+    public DataGraphFragment getGraphFragment() {
+        return dataGraphFragment;
+    }
 }
