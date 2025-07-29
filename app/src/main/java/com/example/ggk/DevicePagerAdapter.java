@@ -14,6 +14,7 @@ public class DevicePagerAdapter extends FragmentStateAdapter {
 
     private DataTransferFragment dataTransferFragment;
     private DataGraphFragment dataGraphFragment;
+    private CommandControlFragment commandControlFragment;
 
     public DevicePagerAdapter(@NonNull FragmentActivity fragmentActivity,
                               String deviceAddress, String deviceName, String deviceFolderName, boolean isFromHistory) {
@@ -38,6 +39,11 @@ public class DevicePagerAdapter extends FragmentStateAdapter {
                     dataGraphFragment = new DataGraphFragment();
                 }
                 return dataGraphFragment;
+            case 2:
+                if (commandControlFragment == null) {
+                    commandControlFragment = new CommandControlFragment();
+                }
+                return commandControlFragment;
             default:
                 throw new IllegalArgumentException("Invalid position: " + position);
         }
@@ -45,10 +51,6 @@ public class DevicePagerAdapter extends FragmentStateAdapter {
 
     @Override
     public int getItemCount() {
-        return 2;
-    }
-
-    public DataGraphFragment getGraphFragment() {
-        return dataGraphFragment;
+        return 3; // Всегда 3 вкладки для всех устройств
     }
 }

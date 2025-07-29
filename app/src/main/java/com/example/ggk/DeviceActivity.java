@@ -67,6 +67,9 @@ public class DeviceActivity extends AppCompatActivity {
                 case 1:
                     tab.setText("График");
                     break;
+                case 2:
+                    tab.setText("Управление");
+                    break;
             }
         }).attach();
 

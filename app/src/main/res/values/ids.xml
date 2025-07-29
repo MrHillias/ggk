@@ -8,4 +8,9 @@
     <item name="end_time_text" type="id"/>
     <item name="time_range_slider" type="id"/>
     <item name="selected_points_text" type="id"/>
+    <item name="btn_command_3" type="id" />
+    <item name="btn_command_2" type="id" />
+    <item name="btn_command_1" type="id" />
+    <item name="command_status_text" type="id" />
+    <item name="device_name_text" type="id" />
 </resources>

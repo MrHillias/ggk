@@ -103,6 +103,11 @@ public class BluetoothService {
     private volatile UUID currentCharacteristicUuid;
     private volatile String currentDeviceAddress;
 
+    // UUID для команд (запись)
+    private volatile UUID currentWriteCharacteristicUuid;
+    private volatile BluetoothGattCharacteristic writeCharacteristic;
+
+
     // Режим синхронизации
     private boolean syncMode = false;
     private long lastSyncTime = 0;
@@ -803,6 +808,48 @@ public class BluetoothService {
             }
         }
 
+        // Модифицированный метод обнаружения сервисов для поддержки записи
+        // UUID для команд (запись)
+        private volatile UUID currentWriteCharacteristicUuid;
+        private volatile BluetoothGattCharacteristic writeCharacteristic;
+
+        // Подключение для отправки команд
+        public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
+            this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
+            connect(deviceAddress, serviceUuid, writeCharacteristicUuid);
+        }
+
+        // Метод для отправки команды
+        public boolean sendCommand(String command) {
+            if (bluetoothGatt == null || writeCharacteristic == null || !isConnected.get()) {
+                Log.e(TAG, "Cannot send command: not connected or characteristic not available");
+                return false;
+            }
+
+            try {
+                // Конвертируем команду в байты
+                byte[] commandBytes = command.getBytes("UTF-8");
+
+                // Устанавливаем значение характеристики
+                writeCharacteristic.setValue(commandBytes);
+
+                // Отправляем команду
+                boolean result = bluetoothGatt.writeCharacteristic(writeCharacteristic);
+
+                if (result) {
+                    Log.d(TAG, "Command sent successfully: " + command);
+                } else {
+                    Log.e(TAG, "Failed to send command: " + command);
+                }
+
+                return result;
+            } catch (Exception e) {
+                Log.e(TAG, "Error sending command", e);
+                return false;
+            }
+        }
+
+        // Модифицированный метод обнаружения сервисов для поддержки записи
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -810,14 +857,36 @@ public class BluetoothService {
 
                 BluetoothGattService service = gatt.getService(currentServiceUuid);
                 if (service != null) {
-                    BluetoothGattCharacteristic characteristic = service.getCharacteristic(currentCharacteristicUuid);
-                    if (characteristic != null) {
-                        boolean success = enableNotifications(gatt, characteristic);
-                        servicesDiscovered.set(true);
-                        notifyServicesDiscovered(success);
+                    // Если это подключение для команд, ищем характеристику для записи
+                    if (currentWriteCharacteristicUuid != null) {
+                        writeCharacteristic = service.getCharacteristic(currentWriteCharacteristicUuid);
+                        if (writeCharacteristic != null) {
+                            // Проверяем, поддерживает ли характеристика запись
+                            int properties = writeCharacteristic.getProperties();
+                            if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
+                                    (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
+                                servicesDiscovered.set(true);
+                                notifyServicesDiscovered(true);
+                                Log.d(TAG, "Write characteristic found and ready");
+                            } else {
+                                Log.e(TAG, "Characteristic does not support write");
+                                handleConnectionFailure("Characteristic does not support write");
+                            }
+                        } else {
+                            Log.e(TAG, "Write characteristic not found");
+                            handleConnectionFailure("Write characteristic not found: " + currentWriteCharacteristicUuid);
+                        }
                     } else {
-                        Log.e(TAG, "Characteristic not found");
-                        handleConnectionFailure("Characteristic not found: " + currentCharacteristicUuid);
+                        // Обычное подключение для чтения
+                        BluetoothGattCharacteristic characteristic = service.getCharacteristic(currentCharacteristicUuid);
+                        if (characteristic != null) {
+                            boolean success = enableNotifications(gatt, characteristic);
+                            servicesDiscovered.set(true);
+                            notifyServicesDiscovered(success);
+                        } else {
+                            Log.e(TAG, "Characteristic not found");
+                            handleConnectionFailure("Characteristic not found: " + currentCharacteristicUuid);
+                        }
                     }
                 } else {
                     Log.e(TAG, "Service not found");
@@ -851,6 +920,42 @@ public class BluetoothService {
             }
         }
     };
+
+    // Подключение для отправки команд
+    public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
+        this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
+        connect(deviceAddress, serviceUuid, writeCharacteristicUuid);
+    }
+
+    // Метод для отправки команды
+    public boolean sendCommand(String command) {
+        if (bluetoothGatt == null || writeCharacteristic == null || !isConnected.get()) {
+            Log.e(TAG, "Cannot send command: not connected or characteristic not available");
+            return false;
+        }
+
+        try {
+            // Конвертируем команду в байты
+            byte[] commandBytes = command.getBytes("UTF-8");
+
+            // Устанавливаем значение характеристики
+            writeCharacteristic.setValue(commandBytes);
+
+            // Отправляем команду
+            boolean result = bluetoothGatt.writeCharacteristic(writeCharacteristic);
+
+            if (result) {
+                Log.d(TAG, "Command sent successfully: " + command);
+            } else {
+                Log.e(TAG, "Failed to send command: " + command);
+            }
+
+            return result;
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending command", e);
+            return false;
+        }
+    }
 
     private void handleDisconnection() {
         boolean wasConnected = isConnected.getAndSet(false);
