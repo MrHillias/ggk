@@ -819,35 +819,6 @@ public class BluetoothService {
             connect(deviceAddress, serviceUuid, writeCharacteristicUuid);
         }
 
-        // Метод для отправки команды
-        public boolean sendCommand(String command) {
-            if (bluetoothGatt == null || writeCharacteristic == null || !isConnected.get()) {
-                Log.e(TAG, "Cannot send command: not connected or characteristic not available");
-                return false;
-            }
-
-            try {
-                // Конвертируем команду в байты
-                byte[] commandBytes = command.getBytes("UTF-8");
-
-                // Устанавливаем значение характеристики
-                writeCharacteristic.setValue(commandBytes);
-
-                // Отправляем команду
-                boolean result = bluetoothGatt.writeCharacteristic(writeCharacteristic);
-
-                if (result) {
-                    Log.d(TAG, "Command sent successfully: " + command);
-                } else {
-                    Log.e(TAG, "Failed to send command: " + command);
-                }
-
-                return result;
-            } catch (Exception e) {
-                Log.e(TAG, "Error sending command", e);
-                return false;
-            }
-        }
 
         // Модифицированный метод обнаружения сервисов для поддержки записи
         @Override
@@ -923,8 +894,10 @@ public class BluetoothService {
 
     // Подключение для отправки команд
     public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
-        this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
-        connect(deviceAddress, serviceUuid, writeCharacteristicUuid);
+        // Устанавливаем флаг, что это подключение для записи
+        this.currentWriteCharacteristicUuid = writeCharacteristicUuid != null ? writeCharacteristicUuid : UUID.fromString("00000000-0000-0000-0000-000000000000");
+        // Для подключения используем обычный UUID, так как currentCharacteristicUuid может быть null
+        connect(deviceAddress, serviceUuid, UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb"));
     }
 
     // Метод для отправки команды

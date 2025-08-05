@@ -22,6 +22,9 @@ public class CommandControlFragment extends Fragment {
     private static final UUID SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb");
     private static final UUID WRITE_UUID = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb"); // UUID для записи
 
+    // Альтернативный UUID для записи, если первый не работает
+    // private static final UUID WRITE_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb");
+
     private String deviceAddress;
     private String deviceName;
     private TextView statusTextView;
@@ -77,7 +80,8 @@ public class CommandControlFragment extends Fragment {
         if (bluetoothService != null && deviceAddress != null) {
             statusTextView.setText("Подключение к устройству...");
             statusTextView.setTextColor(getResources().getColor(R.color.bluetooth_scanning));
-            bluetoothService.connectForCommands(deviceAddress, SERVICE_UUID, WRITE_UUID);
+            // Передаем null для автоматического поиска характеристики с поддержкой записи
+            bluetoothService.connectForCommands(deviceAddress, SERVICE_UUID, null);
         }
     }
 
