@@ -663,6 +663,11 @@ public class BluetoothService {
         currentServiceUuid = serviceUuid;
         currentCharacteristicUuid = characteristicUuid;
 
+        // Если это не подключение для команд, очищаем переменные для записи
+        if (currentWriteCharacteristicUuid == null) {
+            writeCharacteristic = null;
+        }
+
         // Сбрасываем счетчик попыток при новом подключении
         reconnectAttempts.set(0);
 
@@ -809,18 +814,6 @@ public class BluetoothService {
         }
 
         // Модифицированный метод обнаружения сервисов для поддержки записи
-        // UUID для команд (запись)
-        private volatile UUID currentWriteCharacteristicUuid;
-        private volatile BluetoothGattCharacteristic writeCharacteristic;
-
-        // Подключение для отправки команд
-        public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
-            this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
-            connect(deviceAddress, serviceUuid, writeCharacteristicUuid);
-        }
-
-
-        // Модифицированный метод обнаружения сервисов для поддержки записи
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -828,44 +821,53 @@ public class BluetoothService {
 
                 BluetoothGattService service = gatt.getService(currentServiceUuid);
                 if (service != null) {
-                    // Если это подключение для команд, ищем характеристику для записи
+                    // Проверяем режим подключения
                     if (currentWriteCharacteristicUuid != null) {
-                        writeCharacteristic = service.getCharacteristic(currentWriteCharacteristicUuid);
-                        if (writeCharacteristic != null) {
-                            // Проверяем, поддерживает ли характеристика запись
-                            int properties = writeCharacteristic.getProperties();
+                        // Режим команд - ищем характеристику для записи
+                        writeCharacteristic = null;
+
+                        for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
+                            UUID uuid = characteristic.getUuid();
+                            int properties = characteristic.getProperties();
+
+                            Log.d(TAG, "Characteristic: " + uuid +
+                                    " Write: " + ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) +
+                                    " WriteNoResp: " + ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0));
+
                             if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
                                     (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
-                                servicesDiscovered.set(true);
-                                notifyServicesDiscovered(true);
-                                Log.d(TAG, "Write characteristic found and ready");
-                            } else {
-                                Log.e(TAG, "Characteristic does not support write");
-                                handleConnectionFailure("Characteristic does not support write");
+                                writeCharacteristic = characteristic;
+                                Log.d(TAG, "Found write characteristic: " + uuid);
+                                break;
                             }
+                        }
+
+                        if (writeCharacteristic != null) {
+                            servicesDiscovered.set(true);
+                            notifyServicesDiscovered(true);
                         } else {
-                            Log.e(TAG, "Write characteristic not found");
-                            handleConnectionFailure("Write characteristic not found: " + currentWriteCharacteristicUuid);
+                            Log.e(TAG, "No write characteristic found");
+                            handleConnectionFailure("No write characteristic found");
                         }
                     } else {
-                        // Обычное подключение для чтения
+                        // Режим чтения
                         BluetoothGattCharacteristic characteristic = service.getCharacteristic(currentCharacteristicUuid);
                         if (characteristic != null) {
                             boolean success = enableNotifications(gatt, characteristic);
                             servicesDiscovered.set(true);
                             notifyServicesDiscovered(success);
                         } else {
-                            Log.e(TAG, "Characteristic not found");
-                            handleConnectionFailure("Characteristic not found: " + currentCharacteristicUuid);
+                            Log.e(TAG, "Read characteristic not found");
+                            handleConnectionFailure("Read characteristic not found");
                         }
                     }
                 } else {
-                    Log.e(TAG, "Service not found");
-                    handleConnectionFailure("Service not found: " + currentServiceUuid);
+                    Log.e(TAG, "Service not found: " + currentServiceUuid);
+                    handleConnectionFailure("Service not found");
                 }
             } else {
-                Log.e(TAG, "Service discovery failed with status: " + status);
-                handleConnectionFailure("Service discovery failed with status: " + status);
+                Log.e(TAG, "Service discovery failed: " + status);
+                handleConnectionFailure("Service discovery failed");
             }
         }
 
@@ -894,10 +896,10 @@ public class BluetoothService {
 
     // Подключение для отправки команд
     public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
-        // Устанавливаем флаг, что это подключение для записи
-        this.currentWriteCharacteristicUuid = writeCharacteristicUuid != null ? writeCharacteristicUuid : UUID.fromString("00000000-0000-0000-0000-000000000000");
-        // Для подключения используем обычный UUID, так как currentCharacteristicUuid может быть null
-        connect(deviceAddress, serviceUuid, UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb"));
+        // Устанавливаем маркер для режима команд
+        this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
+        // Используем обычный connect
+        connect(deviceAddress, serviceUuid, null);
     }
 
     // Метод для отправки команды
@@ -935,6 +937,10 @@ public class BluetoothService {
         isConnecting.set(false);
         servicesDiscovered.set(false);
         notificationsEnabled.set(false);
+
+        // Очищаем переменные для команд
+        currentWriteCharacteristicUuid = null;
+        writeCharacteristic = null;
 
         // Обрабатываем оставшиеся данные в буфере
         if (bufferedBytesCount.get() > 0) {

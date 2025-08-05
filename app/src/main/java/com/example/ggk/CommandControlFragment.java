@@ -80,8 +80,8 @@ public class CommandControlFragment extends Fragment {
         if (bluetoothService != null && deviceAddress != null) {
             statusTextView.setText("Подключение к устройству...");
             statusTextView.setTextColor(getResources().getColor(R.color.bluetooth_scanning));
-            // Передаем null для автоматического поиска характеристики с поддержкой записи
-            bluetoothService.connectForCommands(deviceAddress, SERVICE_UUID, null);
+            // Передаем любой не-null UUID как маркер режима команд
+            bluetoothService.connectForCommands(deviceAddress, SERVICE_UUID, SERVICE_UUID);
         }
     }
 
