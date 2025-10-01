@@ -19,9 +19,9 @@ public class MTDeviceHandler {
     private static final UUID CHAR_UUID_FFF2 = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
 
     // Константы
-    private static final long COMMAND_TIMEOUT = 5000; // 5 секунд
-    private static final long COMMAND_DELAY = 1000; // 1 секунда между командами
-    private static final long INITIAL_DELAY = 1000; // Задержка перед началом команд
+    private static final long COMMAND_TIMEOUT = 5000;
+    private static final long COMMAND_DELAY = 1000;
+    private static final long INITIAL_DELAY = 1000;
     private static final String COMMAND_TERMINATOR = "\r";
 
     // Список команд для опроса
@@ -30,7 +30,11 @@ public class MTDeviceHandler {
             "DataSize?",
             "WorkTime?",
             "PmaxAllTime?",
-            "Pminmax24?"
+            "Pminmax24?",
+            "UnitsAll?",
+            "RangesAll?",
+            "Units?",
+            "Ranges?"
     };
 
     // Поля класса
@@ -116,8 +120,6 @@ public class MTDeviceHandler {
 
         // Сервис для ЧТЕНИЯ ответов
         readService = new BluetoothService(context);
-
-        // КРИТИЧЕСКИ ВАЖНО: Включаем режим чистого текста для MT устройств
         readService.setRawTextMode(true);
 
         readService.setCallback(new BluetoothService.BluetoothCallback() {
@@ -185,17 +187,8 @@ public class MTDeviceHandler {
 
         Log.d(TAG, "=== MT DEVICE CONNECTION START ===");
         Log.d(TAG, "Device address: " + deviceAddress);
-        Log.d(TAG, "Write UUID: " + CHAR_UUID_FFF2);
-        Log.d(TAG, "Read UUID: " + CHAR_UUID_FFF1);
-        Log.d(TAG, "Command terminator: " + COMMAND_TERMINATOR.replace("\r", "\\r").replace("\n", "\\n"));
-        Log.d(TAG, "Commands to send: " + Arrays.toString(BASIC_COMMANDS));
 
-        // Пробуем FFF2 для записи команд (стандарт)
-        Log.d(TAG, "Connecting write service to FFF2...");
         writeService.connectForCommands(deviceAddress, SERVICE_UUID, CHAR_UUID_FFF2);
-
-        // Читаем ответы с FFF1
-        Log.d(TAG, "Connecting read service to FFF1...");
         readService.connect(deviceAddress, SERVICE_UUID, CHAR_UUID_FFF1);
     }
 
@@ -229,9 +222,6 @@ public class MTDeviceHandler {
         Log.d(TAG, "Command: " + currentCommand);
 
         String commandWithTerminator = currentCommand + COMMAND_TERMINATOR;
-        Log.d(TAG, "With terminator: [" + commandWithTerminator.replace("\r", "\\r").replace("\n", "\\n") + "]");
-        Log.d(TAG, "Bytes: " + Arrays.toString(commandWithTerminator.getBytes()));
-
         boolean sent = writeService.sendCommand(commandWithTerminator);
 
         if (sent) {
@@ -251,7 +241,6 @@ public class MTDeviceHandler {
         timeoutRunnable = () -> {
             Log.w(TAG, "=== TIMEOUT ===");
             Log.w(TAG, "Command: " + currentCommand);
-            Log.w(TAG, "Buffer content: [" + responseBuffer.toString().replace("\r", "\\r").replace("\n", "\\n") + "]");
             saveResponse(currentCommand, "TIMEOUT");
             moveToNextCommand();
         };
@@ -268,43 +257,22 @@ public class MTDeviceHandler {
 
     private void handleReceivedData(String data) {
         Log.d(TAG, "=== handleReceivedData START ===");
-        Log.d(TAG, "isProcessing: " + isProcessing);
-        Log.d(TAG, "currentCommand: " + currentCommand);
-        Log.d(TAG, "Received data: [" + data.replace("\r", "\\r").replace("\n", "\\n") + "]");
 
         if (!isProcessing || currentCommand == null) {
             Log.w(TAG, "Ignoring data - not processing or no current command");
-            Log.d(TAG, "=== handleReceivedData END (ignored) ===");
             return;
         }
 
         responseBuffer.append(data);
         String bufferContent = responseBuffer.toString();
 
-        Log.d(TAG, "Buffer now: [" + bufferContent.replace("\r", "\\r").replace("\n", "\\n") + "]");
-        Log.d(TAG, "Buffer length: " + bufferContent.length());
-
-        // Проверяем окончание ответа
         boolean hasTerminator = bufferContent.contains("\r") || bufferContent.contains("\n");
         boolean hasEnoughData = bufferContent.length() > 3;
-        boolean looksComplete = bufferContent.length() > 0 &&
-                (bufferContent.contains(" ") || bufferContent.matches(".*[A-Za-z0-9]+.*"));
 
-        Log.d(TAG, "hasTerminator: " + hasTerminator);
-        Log.d(TAG, "hasEnoughData: " + hasEnoughData);
-        Log.d(TAG, "looksComplete: " + looksComplete);
-
-        if (hasTerminator || (hasEnoughData && looksComplete)) {
+        if (hasTerminator || hasEnoughData) {
             cancelCommandTimeout();
 
-            // Очищаем ответ от управляющих символов
-            String fullResponse = bufferContent
-                    .replace("\r", "\n")
-                    .trim();
-
-            Log.d(TAG, "Full response with newlines: [" + fullResponse + "]");
-
-            // ВАЖНО: Извлекаем только последнюю строку (текущий ответ)
+            String fullResponse = bufferContent.replace("\r", "\n").trim();
             String response = extractLastResponse(fullResponse, currentCommand);
 
             Log.d(TAG, "=== RESPONSE COMPLETE ===");
@@ -313,75 +281,25 @@ public class MTDeviceHandler {
 
             saveResponse(currentCommand, response);
             moveToNextCommand();
-        } else {
-            Log.d(TAG, "Waiting for more data...");
-
-            // Таймер для принудительного завершения
-            mainHandler.postDelayed(() -> {
-                if (isProcessing && currentCommand != null && responseBuffer.length() > 0) {
-                    Log.d(TAG, "=== FORCE COMPLETING RESPONSE ===");
-                    cancelCommandTimeout();
-
-                    String fullResponse = responseBuffer.toString()
-                            .replace("\r", "\n")
-                            .trim();
-
-                    String response = extractLastResponse(fullResponse, currentCommand);
-
-                    if (!response.isEmpty()) {
-                        Log.d(TAG, "Forced response: [" + response + "]");
-                        saveResponse(currentCommand, response);
-                        moveToNextCommand();
-                    }
-                }
-            }, 500);
         }
-
-        Log.d(TAG, "=== handleReceivedData END ===");
     }
 
-    /**
-     * Извлекает последний ответ из буфера, игнорируя мусор
-     */
     private String extractLastResponse(String fullResponse, String command) {
-        // Убираем "?" из команды для поиска
         String commandBase = command.replace("?", "");
-
-        Log.d(TAG, "Extracting response for command: " + commandBase);
-
-        // Разбиваем на строки
         String[] lines = fullResponse.split("\n");
 
-        // Ищем строку, которая начинается с нашей команды
         for (int i = lines.length - 1; i >= 0; i--) {
             String line = lines[i].trim();
-            Log.d(TAG, "Checking line " + i + ": [" + line + "]");
-
             if (line.startsWith(commandBase)) {
-                // Нашли! Извлекаем значение после команды
                 String value = line.substring(commandBase.length()).trim();
-                Log.d(TAG, "Found matching line, extracted value: [" + value + "]");
                 return value;
             }
         }
 
-        // Если не нашли по точному совпадению, попробуем найти в последней строке
         if (lines.length > 0) {
-            String lastLine = lines[lines.length - 1].trim();
-            Log.d(TAG, "No exact match found, using last line: [" + lastLine + "]");
-
-            // Убираем мусор из начала (AT команды и т.д.)
-            if (lastLine.contains(commandBase)) {
-                int cmdIndex = lastLine.indexOf(commandBase);
-                String value = lastLine.substring(cmdIndex + commandBase.length()).trim();
-                Log.d(TAG, "Extracted from last line: [" + value + "]");
-                return value;
-            }
-
-            return lastLine;
+            return lines[lines.length - 1].trim();
         }
 
-        Log.d(TAG, "Could not extract response, returning empty string");
         return "";
     }
 
@@ -393,8 +311,6 @@ public class MTDeviceHandler {
     private void moveToNextCommand() {
         commandIndex++;
         responseBuffer.setLength(0);
-
-        Log.d(TAG, "Moving to next command after " + COMMAND_DELAY + "ms delay");
         mainHandler.postDelayed(this::sendNextCommand, COMMAND_DELAY);
     }
 
@@ -404,12 +320,6 @@ public class MTDeviceHandler {
 
         Log.d(TAG, "=== COMMAND SEQUENCE FINISHED ===");
         Log.d(TAG, "Total responses: " + deviceInfo.size());
-
-        // Выводим все результаты
-        for (Map.Entry<String, String> entry : deviceInfo.entrySet()) {
-            String status = "TIMEOUT".equals(entry.getValue()) ? "✗" : "✓";
-            Log.d(TAG, status + " " + entry.getKey() + ": " + entry.getValue());
-        }
 
         notifyDeviceInfoReady();
     }
@@ -434,14 +344,28 @@ public class MTDeviceHandler {
         }
     }
 
-    public void setRange(int rangeValue) {
+    public void setRange(int rangeIndex) {
         if (writeService != null && writeService.isConnected()) {
-            String command = "Ranges " + rangeValue + COMMAND_TERMINATOR;
+            String command = "Ranges " + rangeIndex + COMMAND_TERMINATOR;
             Log.d(TAG, "Sending range command: " + command);
             writeService.sendCommand(command);
         } else {
             notifyError("Устройство не подключено");
         }
+    }
+
+    public void setUnits(int unitsIndex) {
+        if (writeService != null && writeService.isConnected()) {
+            String command = "Units " + unitsIndex + COMMAND_TERMINATOR;
+            Log.d(TAG, "Sending units command: " + command);
+            writeService.sendCommand(command);
+        } else {
+            notifyError("Устройство не подключено");
+        }
+    }
+
+    public Map<String, String> getDeviceInfo() {
+        return new HashMap<>(deviceInfo);
     }
 
     public void disconnect() {

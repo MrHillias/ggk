@@ -52,24 +52,29 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:gravity="center">
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/refresh_button"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:id="@+id/save_button"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="56dp"
                         android:layout_weight="1"
                         android:layout_marginEnd="8dp"
-                        android:text="Обновить" />
+                        android:text="Сохранить"
+                        android:textSize="16sp"
+                        android:enabled="false"
+                        style="@style/Widget.MaterialComponents.Button" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/data_button"
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
+                        android:layout_height="56dp"
                         android:layout_weight="1"
                         android:enabled="false"
-                        android:text="Получить данные" />
+                        android:text="Получить\nданные"
+                        android:textSize="14sp"
+                        style="@style/Widget.Material3.Button.TonalButton" />
 
                 </LinearLayout>
 
