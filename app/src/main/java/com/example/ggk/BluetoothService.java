@@ -37,18 +37,14 @@ import java.util.concurrent.atomic.AtomicLong;
 public class BluetoothService {
     private static final String TAG = "BluetoothService";
     private static final long CONNECTION_TIMEOUT = 15000;
-    private static final int BUFFER_SIZE_THRESHOLD = 8192; // Увеличиваем до 8KB
+    private static final int BUFFER_SIZE_THRESHOLD = 8192;
     private static final int MAX_DATA_DISPLAY_SIZE = 16384;
     private static final String DATA_TAG = "BLE_DATA";
     private static final int MAX_RECONNECT_ATTEMPTS = 3;
     private static final long RECONNECT_DELAY = 2000;
-    private static final long BUFFER_PROCESS_INTERVAL = 50; // Ускоряем обработку до 50мс
-
-    // Большой буфер для приема данных - 1MB
-    private static final int MAX_RECEPTION_BUFFER_SIZE = 1024 * 1024; // 1MB
-    private static final long UI_UPDATE_INTERVAL = 500; // Обновляем UI только раз в 500мс
-
-    // Параметры для контроля потока данных
+    private static final long BUFFER_PROCESS_INTERVAL = 50;
+    private static final int MAX_RECEPTION_BUFFER_SIZE = 1024 * 1024;
+    private static final long UI_UPDATE_INTERVAL = 500;
     private static final int MAX_PENDING_NOTIFICATIONS = 10;
     private static final long NOTIFICATION_TIMEOUT = 5000;
 
@@ -60,33 +56,27 @@ public class BluetoothService {
     private final Handler backgroundHandler;
     private final ExecutorService dataProcessingExecutor;
 
-    // Атомарные переменные для thread-safe операций
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
     private final AtomicBoolean isConnecting = new AtomicBoolean(false);
     private final AtomicBoolean saveToFile = new AtomicBoolean(false);
-    private final AtomicBoolean asciiMode = new AtomicBoolean(true); // По умолчанию ASCII режим
-    private final AtomicBoolean numericMode = new AtomicBoolean(false); // Режим только чисел после '\r\n'
+    private final AtomicBoolean asciiMode = new AtomicBoolean(true);
+    private final AtomicBoolean numericMode = new AtomicBoolean(false);
     private final AtomicInteger reconnectAttempts = new AtomicInteger(0);
+
+    // Флаг для отключения автоматической обработки (для MT устройств)
+    private final AtomicBoolean rawTextMode = new AtomicBoolean(false);
 
     private volatile FileOutputStream fileOutputStream;
     private volatile File outputFile;
 
-    // Буфер для отслеживания окончания последовательности '\r\n'
     private final StringBuilder sequenceBuffer = new StringBuilder();
-
-    // Буфер для отслеживания последовательности "End\r\n" в числовом режиме
     private final java.util.List<Integer> numericBuffer = new java.util.ArrayList<>();
-
-    // Буфер для накопления данных - используем большой буфер
     private final Queue<byte[]> dataBuffer = new ConcurrentLinkedQueue<>();
     private final AtomicInteger bufferedBytesCount = new AtomicInteger(0);
-
-    // Большой буфер для быстрого приема данных (1MB)
     private final java.io.ByteArrayOutputStream receptionBuffer = new java.io.ByteArrayOutputStream(MAX_RECEPTION_BUFFER_SIZE);
     private volatile long lastUIUpdateTime = 0;
     private volatile boolean receptionComplete = false;
 
-    // Статистика - используем AtomicLong для thread-safety
     private final AtomicLong totalBytesReceived = new AtomicLong(0);
     private final AtomicLong totalPacketsReceived = new AtomicLong(0);
     private final AtomicLong droppedPackets = new AtomicLong(0);
@@ -94,21 +84,15 @@ public class BluetoothService {
     private volatile long lastDataReceivedTime = 0;
     private volatile int lastSequenceNumber = -1;
 
-    // Для уведомления о статусе соединения
     private final AtomicBoolean servicesDiscovered = new AtomicBoolean(false);
     private final AtomicBoolean notificationsEnabled = new AtomicBoolean(false);
 
-    // UUID для подключения
     private volatile UUID currentServiceUuid;
     private volatile UUID currentCharacteristicUuid;
     private volatile String currentDeviceAddress;
-
-    // UUID для команд (запись)
     private volatile UUID currentWriteCharacteristicUuid;
     private volatile BluetoothGattCharacteristic writeCharacteristic;
 
-
-    // Режим синхронизации
     private boolean syncMode = false;
     private long lastSyncTime = 0;
 
@@ -128,32 +112,33 @@ public class BluetoothService {
         BluetoothManager bluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
         bluetoothAdapter = bluetoothManager.getAdapter();
 
-        // Создаем background handler для операций, не связанных с UI
         this.backgroundHandler = new Handler(Looper.getMainLooper());
 
-        // Используем отдельный пул потоков для обработки данных
         dataProcessingExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "BluetoothDataProcessor");
             t.setDaemon(true);
             return t;
         });
 
-        // Запускаем периодическую обработку буфера
         scheduleBufferProcessing();
     }
 
-    // Установка режима синхронизации
     public void setSyncMode(boolean enabled, long lastSyncTime) {
         this.syncMode = enabled;
         this.lastSyncTime = lastSyncTime;
         Log.d(TAG, "Sync mode set to: " + enabled + ", last sync time: " + lastSyncTime);
     }
 
+    // Установка режима чистого текста (для MT устройств)
+    public void setRawTextMode(boolean enabled) {
+        this.rawTextMode.set(enabled);
+        Log.d(TAG, "Raw text mode set to: " + enabled);
+    }
+
     private void scheduleBufferProcessing() {
         backgroundHandler.postDelayed(bufferProcessRunnable, BUFFER_PROCESS_INTERVAL);
     }
 
-    // Runnable для периодической обработки буфера
     private final Runnable bufferProcessRunnable = new Runnable() {
         @Override
         public void run() {
@@ -164,7 +149,6 @@ public class BluetoothService {
             } catch (Exception e) {
                 Log.e(TAG, "Error in buffer processing", e);
             } finally {
-                // Перепланируем выполнение только если сервис активен
                 if (isConnected.get() || isConnecting.get()) {
                     backgroundHandler.postDelayed(this, BUFFER_PROCESS_INTERVAL);
                 }
@@ -172,14 +156,12 @@ public class BluetoothService {
         }
     };
 
-    // Обработка накопленных данных
     private void processDataBuffer() {
         dataProcessingExecutor.execute(() -> {
             try {
                 List<byte[]> dataChunks = new ArrayList<>();
                 int totalSize = 0;
 
-                // Извлекаем все данные из очереди
                 byte[] chunk;
                 while ((chunk = dataBuffer.poll()) != null) {
                     dataChunks.add(chunk);
@@ -189,18 +171,16 @@ public class BluetoothService {
 
                 if (totalSize == 0) return;
 
-                // Объединяем все чанки в один массив
                 ByteBuffer combinedBuffer = ByteBuffer.allocate(totalSize);
                 for (byte[] dataChunk : dataChunks) {
                     combinedBuffer.put(dataChunk);
 
-                    // Если включено сохранение в файл
                     if (saveToFile.get() && fileOutputStream != null) {
                         try {
                             synchronized (this) {
                                 if (fileOutputStream != null) {
                                     fileOutputStream.write(dataChunk);
-                                    fileOutputStream.flush(); // Принудительная запись
+                                    fileOutputStream.flush();
                                 }
                             }
                         } catch (IOException e) {
@@ -211,17 +191,13 @@ public class BluetoothService {
                 }
 
                 byte[] combinedData = combinedBuffer.array();
-
-                // Форматируем данные для отображения
                 String formattedBatch = formatDataBatch(combinedData);
 
-                // Расчет скорости передачи
                 long currentTime = System.currentTimeMillis();
                 double elapsedTimeSeconds = (currentTime - startReceivingTime) / 1000.0;
                 long totalBytes = totalBytesReceived.get();
                 double kbPerSecond = elapsedTimeSeconds > 0 ? (totalBytes / 1024.0) / elapsedTimeSeconds : 0;
 
-                // Обновляем UI через callback
                 if (callback != null) {
                     mainHandler.post(() -> {
                         try {
@@ -246,33 +222,44 @@ public class BluetoothService {
         }
     }
 
-    // Форматирование данных для отображения в текстовом виде с Windows-1251
     private String formatDataBatchAsAscii(byte[] data) {
         StringBuilder result = new StringBuilder();
 
+        // Если включен режим чистого текста (для MT устройств), просто возвращаем текст как есть
+        if (rawTextMode.get()) {
+            for (byte b : data) {
+                int value = b & 0xFF;
+                if (value >= 32 && value <= 126) {
+                    result.append((char) value);
+                } else if (value == 10) {
+                    result.append("\n");
+                } else if (value == 13) {
+                    result.append("\r");
+                } else if (value == 9) {
+                    result.append("\t");
+                }
+            }
+            return result.toString();
+        }
+
         Log.d(TAG, "formatDataBatchAsAscii called, initial numericMode: " + numericMode.get() + ", data length: " + data.length);
 
-        // Обрабатываем каждый байт отдельно
         for (int i = 0; i < data.length; i++) {
             byte currentByte = data[i];
             int value = currentByte & 0xFF;
 
-            // Если еще не в числовом режиме, отслеживаем последовательность
             if (!numericMode.get()) {
                 sequenceBuffer.append((char) value);
 
-                // Проверяем наличие "Start" и затем реальных байтов CR LF (не символов!)
                 String bufferContent = sequenceBuffer.toString();
                 if (bufferContent.contains("Start")) {
                     int startIndex = bufferContent.lastIndexOf("Start");
 
-                    // Логируем последовательность для отладки
                     if (startIndex + 5 < bufferContent.length()) {
                         String afterStart = bufferContent.substring(startIndex + 5);
                         Log.d(TAG, "Found 'Start', checking what follows: [" +
                                 afterStart.replaceAll("\r", "\\\\r").replaceAll("\n", "\\\\n") + "]");
 
-                        // Логируем ASCII коды символов после "Start"
                         StringBuilder codes = new StringBuilder();
                         for (int k = 0; k < Math.min(afterStart.length(), 10); k++) {
                             codes.append((int)afterStart.charAt(k)).append(" ");
@@ -280,26 +267,19 @@ public class BluetoothService {
                         Log.d(TAG, "ASCII codes after 'Start': " + codes.toString());
                     }
 
-                    // Проверяем, что после "Start" идут именно байты 13 и 10 (или только 10)
                     if (startIndex + 5 < bufferContent.length()) {
                         String afterStart = bufferContent.substring(startIndex + 5);
-
-                        // Ищем последовательность CR(13) + LF(10) или просто LF(10)
                         boolean foundNewline = false;
 
-                        // Проверяем каждый символ после "Start"
                         for (int j = 0; j < afterStart.length(); j++) {
                             char c = afterStart.charAt(j);
                             int charCode = (int) c;
 
-                            // Если встречаем LF (10) или CR+LF (13+10)
                             if (charCode == 10) {
                                 foundNewline = true;
                                 Log.d(TAG, "Found LF (10) at position " + j + " after 'Start'");
                                 break;
-                            }
-                            // Если встречаем CR (13), проверяем следующий символ
-                            else if (charCode == 13 && j + 1 < afterStart.length()) {
+                            } else if (charCode == 13 && j + 1 < afterStart.length()) {
                                 char nextC = afterStart.charAt(j + 1);
                                 if ((int) nextC == 10) {
                                     foundNewline = true;
@@ -309,57 +289,44 @@ public class BluetoothService {
                             }
                         }
 
-                        // Альтернативная проверка: если после "Start" идет пробел и символы,
-                        // возможно это другой формат данных
                         if (!foundNewline && afterStart.startsWith(" ")) {
                             Log.d(TAG, "Alternative pattern: 'Start' followed by space and data");
-                            // Возможно, переключение должно происходить после "Start " (с пробелом)
                             foundNewline = true;
                         }
 
                         if (foundNewline) {
-                            // Найден переход! Переключаемся в числовой режим
                             numericMode.set(true);
                             Log.d(TAG, "Switching to numeric mode at byte " + i + " after 'Start' + newline (real \\r\\n)");
 
-                            // Добавляем перевод строки в результат перед переключением
                             result.append("\n");
 
-                            // Уведомляем пользователя
                             if (callback != null) {
                                 mainHandler.post(() -> callback.onError("AUTO: Switched to numeric mode after 'Start' + newline"));
                             }
 
                             sequenceBuffer.setLength(0);
 
-                            // НЕ добавляем текущий байт, если это CR или LF после "Start"
                             if (value == 13 || value == 10) {
-                                // Пропускаем CR и LF после "Start", не отображаем их как числа
                                 continue;
                             }
 
-                            // Добавляем текущий байт уже как число только если это не CR/LF
                             result.append(value).append(" ");
                             continue;
                         }
                     }
                 }
 
-                // Ограничиваем размер буфера
                 if (sequenceBuffer.length() > 100) {
                     String keepEnd = sequenceBuffer.substring(sequenceBuffer.length() - 50);
                     sequenceBuffer.setLength(0);
                     sequenceBuffer.append(keepEnd);
                 }
 
-                // Добавляем как текст (до переключения)
                 if (value >= 32 && value <= 126) {
                     result.append((char) value);
                 } else if (value == 10) {
                     result.append("\n");
                 } else if (value == 13) {
-                    // CR - не добавляем отдельно, он будет обработан вместе с LF
-                    // Только добавляем если следующий байт НЕ LF
                     if (i + 1 < data.length && (data[i + 1] & 0xFF) != 10) {
                         result.append("\r");
                     }
@@ -369,48 +336,37 @@ public class BluetoothService {
                     result.append(".");
                 }
             } else {
-                // Уже в числовом режиме - все как числа
-
-                // Добавляем в буфер для отслеживания "End\r\n" (69 110 100 13 10)
                 numericBuffer.add(value);
 
-                // Ограничиваем размер буфера (держим только последние 10 байт)
                 if (numericBuffer.size() > 10) {
                     numericBuffer.remove(0);
                 }
 
-                // Проверяем на последовательность "End\r\n" (69 110 100 13 10)
                 if (numericBuffer.size() >= 5) {
                     int size = numericBuffer.size();
-                    if (numericBuffer.get(size - 5) == 69 &&  // 'E'
-                            numericBuffer.get(size - 4) == 110 && // 'n'
-                            numericBuffer.get(size - 3) == 100 && // 'd'
-                            numericBuffer.get(size - 2) == 13 &&  // '\r'
-                            numericBuffer.get(size - 1) == 10) {  // '\n'
+                    if (numericBuffer.get(size - 5) == 69 &&
+                            numericBuffer.get(size - 4) == 110 &&
+                            numericBuffer.get(size - 3) == 100 &&
+                            numericBuffer.get(size - 2) == 13 &&
+                            numericBuffer.get(size - 1) == 10) {
 
                         Log.d(TAG, "Found 'End\\r\\n' sequence in numeric mode");
 
-                        // Удаляем последние 5 чисел из результата (если они уже добавлены)
                         String currentResult = result.toString();
                         String[] parts = currentResult.trim().split("\\s+");
 
                         if (parts.length >= 5) {
-                            // Восстанавливаем результат без последних 5 чисел
                             StringBuilder newResult = new StringBuilder();
                             for (int j = 0; j < parts.length - 5; j++) {
                                 newResult.append(parts[j]).append(" ");
                             }
-                            // Добавляем "End" и переход строки
                             newResult.append("End\n");
 
-                            // Заменяем результат
                             result.setLength(0);
                             result.append(newResult.toString());
 
-                            // Очищаем буфер
                             numericBuffer.clear();
 
-                            // Уведомляем пользователя
                             if (callback != null) {
                                 mainHandler.post(() -> callback.onError("Found 'End' sequence - data transmission complete"));
                             }
@@ -420,7 +376,6 @@ public class BluetoothService {
                     }
                 }
 
-                // Добавляем как обычное число
                 result.append(value).append(" ");
             }
         }
@@ -428,46 +383,23 @@ public class BluetoothService {
         return result.toString();
     }
 
-    // Проверка, является ли текст валидным для отображения
-    private boolean isValidText(String text) {
-        if (text == null || text.isEmpty()) return false;
-
-        int printableChars = 0;
-        int totalChars = text.length();
-
-        for (char c : text.toCharArray()) {
-            if (Character.isLetterOrDigit(c) || Character.isWhitespace(c) ||
-                    ".,!?;:()[]{}\"'-+=<>/@#$%^&*".indexOf(c) >= 0) {
-                printableChars++;
-            }
-        }
-
-        // Считаем текст валидным, если более 70% символов печатаемые
-        return (printableChars * 100.0 / totalChars) > 70;
-    }
-
-    // Форматирование данных для HEX режима с переключением на числа после 'Start\r\n'
     private String formatDataBatchAsHex(byte[] data) {
         StringBuilder result = new StringBuilder();
 
         Log.d(TAG, "formatDataBatchAsHex called, initial numericMode: " + numericMode.get() + ", data length: " + data.length);
 
-        // Обрабатываем каждый байт отдельно
         for (int i = 0; i < data.length; i++) {
             byte currentByte = data[i];
             int value = currentByte & 0xFF;
 
-            // Если еще не в числовом режиме, отслеживаем последовательность
             if (!numericMode.get()) {
                 sequenceBuffer.append((char) value);
 
-                // Проверяем наличие "Start" и затем CR LF (13 10)
                 String bufferContent = sequenceBuffer.toString();
                 if (bufferContent.contains("Start")) {
                     int startIndex = bufferContent.lastIndexOf("Start");
                     String afterStart = bufferContent.substring(startIndex + 5);
 
-                    // Проверяем точную последовательность: Start + CR(13) + LF(10)
                     if (afterStart.length() >= 2) {
                         boolean foundCRLF = false;
                         for (int j = 0; j < afterStart.length() - 1; j++) {
@@ -480,32 +412,26 @@ public class BluetoothService {
                         }
 
                         if (foundCRLF) {
-                            // Найден переход! Переключаемся в числовой режим
                             numericMode.set(true);
                             Log.d(TAG, "HEX mode - Switching to numeric mode at byte " + i + " after 'Start' + CR LF");
 
-                            // Уведомляем пользователя
                             if (callback != null) {
                                 mainHandler.post(() -> callback.onError("AUTO: Switched to numeric mode after 'Start'"));
                             }
 
                             sequenceBuffer.setLength(0);
-
-                            // Добавляем текущий байт уже как число
                             result.append(value).append(" ");
                             continue;
                         }
                     }
                 }
 
-                // Ограничиваем размер буфера
                 if (sequenceBuffer.length() > 100) {
                     String keepEnd = sequenceBuffer.substring(sequenceBuffer.length() - 50);
                     sequenceBuffer.setLength(0);
                     sequenceBuffer.append(keepEnd);
                 }
 
-                // Добавляем как символы (до переключения)
                 if (value >= 32 && value <= 126) {
                     result.append("'").append((char) value).append("' ");
                 } else if (value == 10) {
@@ -520,7 +446,6 @@ public class BluetoothService {
                     result.append(value).append(" ");
                 }
             } else {
-                // Уже в числовом режиме - все как числа
                 result.append(value).append(" ");
             }
         }
@@ -528,64 +453,6 @@ public class BluetoothService {
         return result.toString();
     }
 
-    // Простой HEX dump без ASCII интерпретации
-    private void addSimpleHexDump(StringBuilder result, byte[] data, int start, int length) {
-        final int BYTES_PER_LINE = 16;
-
-        for (int i = start; i < start + length; i += BYTES_PER_LINE) {
-            // Адрес
-            result.append(String.format("%04X: ", i));
-
-            // Только HEX байты
-            for (int j = 0; j < BYTES_PER_LINE; j++) {
-                if (i + j < start + length) {
-                    int value = data[i + j] & 0xFF;
-                    result.append(String.format("%02X ", value));
-                } else {
-                    result.append("   ");
-                }
-
-                // Дополнительный пробел в середине для читаемости
-                if (j == 7) {
-                    result.append(" ");
-                }
-            }
-            result.append("\n");
-        }
-    }
-
-    // Вспомогательный метод для создания hex dump
-    private void addHexDump(StringBuilder result, byte[] data, int start, int length) {
-        final int BYTES_PER_LINE = 16;
-
-        for (int i = start; i < start + length; i += BYTES_PER_LINE) {
-            // Адрес
-            result.append(String.format("%04X: ", i));
-
-            // HEX представление
-            for (int j = 0; j < BYTES_PER_LINE; j++) {
-                if (i + j < start + length) {
-                    result.append(String.format("%02X ", data[i + j] & 0xFF));
-                } else {
-                    result.append("   ");
-                }
-                if (j == 7) result.append(" ");
-            }
-
-            result.append(" | ");
-
-            // ASCII представление
-            for (int j = 0; j < BYTES_PER_LINE; j++) {
-                if (i + j < start + length) {
-                    int value = data[i + j] & 0xFF;
-                    result.append((value >= 32 && value <= 126) ? (char) value : '.');
-                }
-            }
-            result.append("\n");
-        }
-    }
-
-    // Улучшенное управление файлами
     public void setSaveToFile(boolean save) {
         saveToFile.set(save);
 
@@ -651,26 +518,21 @@ public class BluetoothService {
         return isConnecting.get();
     }
 
-    // Улучшенный метод подключения с переподключением
     public void connect(String deviceAddress, UUID serviceUuid, UUID characteristicUuid) {
         if (bluetoothAdapter == null || deviceAddress == null) {
             notifyError("Bluetooth adapter not available or device address is null");
             return;
         }
 
-        // Сохраняем параметры для переподключения
         currentDeviceAddress = deviceAddress;
         currentServiceUuid = serviceUuid;
         currentCharacteristicUuid = characteristicUuid;
 
-        // Если это не подключение для команд, очищаем переменные для записи
         if (currentWriteCharacteristicUuid == null) {
             writeCharacteristic = null;
         }
 
-        // Сбрасываем счетчик попыток при новом подключении
         reconnectAttempts.set(0);
-
         connectInternal();
     }
 
@@ -680,34 +542,26 @@ public class BluetoothService {
             return;
         }
 
-        // Закрываем предыдущее соединение, если есть
         closeConnection();
 
-        // Сбрасываем флаги состояния
         isConnected.set(false);
         isConnecting.set(true);
         servicesDiscovered.set(false);
         notificationsEnabled.set(false);
 
-        // Сбрасываем числовой режим при новом подключении
         resetNumericMode();
         Log.d(TAG, "Connection started - reset to text mode, numeric mode: " + numericMode.get());
 
-        // Очищаем счетчики и буферы
         totalBytesReceived.set(0);
         totalPacketsReceived.set(0);
         droppedPackets.set(0);
         startReceivingTime = System.currentTimeMillis();
         lastDataReceivedTime = 0;
 
-        // Очищаем большой буфер приема
         clearReceptionBuffer();
-
-        // Очищаем обычный буфер
         dataBuffer.clear();
         bufferedBytesCount.set(0);
 
-        // Получаем устройство по адресу
         final BluetoothDevice device = bluetoothAdapter.getRemoteDevice(currentDeviceAddress);
         if (device == null) {
             notifyError("Device not found. Unable to connect.");
@@ -715,7 +569,6 @@ public class BluetoothService {
             return;
         }
 
-        // Настраиваем таймаут соединения
         mainHandler.postDelayed(() -> {
             if (isConnecting.get() && !isConnected.get()) {
                 Log.e(TAG, "Connection timeout");
@@ -723,7 +576,6 @@ public class BluetoothService {
             }
         }, CONNECTION_TIMEOUT);
 
-        // Подключаемся к устройству
         Log.d(TAG, "Attempting to connect to device: " + currentDeviceAddress);
         try {
             bluetoothGatt = device.connectGatt(context, false, gattCallback);
@@ -736,7 +588,6 @@ public class BluetoothService {
         }
     }
 
-    // Централизованная обработка ошибок подключения
     private void handleConnectionFailure(String error) {
         isConnecting.set(false);
         isConnected.set(false);
@@ -749,13 +600,11 @@ public class BluetoothService {
         }
 
         if (attempts < MAX_RECONNECT_ATTEMPTS) {
-            // Пытаемся переподключиться
             mainHandler.postDelayed(() -> {
                 Log.i(TAG, "Attempting to reconnect...");
                 connectInternal();
             }, RECONNECT_DELAY);
         } else {
-            // Превышено количество попыток
             notifyError("Failed to connect after " + MAX_RECONNECT_ATTEMPTS + " attempts: " + error);
             notifyConnectionStateChange(false);
         }
@@ -773,15 +622,12 @@ public class BluetoothService {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 isConnected.set(true);
                 isConnecting.set(false);
-                reconnectAttempts.set(0); // Сбрасываем счетчик при успешном подключении
+                reconnectAttempts.set(0);
 
                 Log.i(TAG, "Connected to GATT server.");
                 notifyConnectionStateChange(true);
-
-                // Запускаем обработчик буфера
                 scheduleBufferProcessing();
 
-                // Запрашиваем увеличение MTU для более эффективной передачи данных
                 boolean mtuResult = gatt.requestMtu(517);
                 if (!mtuResult) {
                     Log.w(TAG, "Failed to request MTU, proceeding with service discovery");
@@ -798,14 +644,11 @@ public class BluetoothService {
             Log.d(TAG, "MTU changed to: " + mtu + ", status: " + status);
 
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                // Успешно установлен больший MTU
                 notifyError("MTU increased to " + mtu + " bytes");
             } else {
-                // Не удалось увеличить MTU, используем стандартный
                 Log.w(TAG, "Failed to increase MTU, using default (23 bytes)");
             }
 
-            // После установки MTU начинаем обнаружение служб
             boolean result = gatt.discoverServices();
             if (!result) {
                 Log.e(TAG, "Failed to start service discovery");
@@ -813,7 +656,6 @@ public class BluetoothService {
             }
         }
 
-        // Модифицированный метод обнаружения сервисов для поддержки записи
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -821,9 +663,7 @@ public class BluetoothService {
 
                 BluetoothGattService service = gatt.getService(currentServiceUuid);
                 if (service != null) {
-                    // Проверяем режим подключения
                     if (currentWriteCharacteristicUuid != null) {
-                        // Режим команд - ищем характеристику для записи
                         writeCharacteristic = null;
 
                         for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
@@ -850,7 +690,6 @@ public class BluetoothService {
                             handleConnectionFailure("No write characteristic found");
                         }
                     } else {
-                        // Режим чтения
                         BluetoothGattCharacteristic characteristic = service.getCharacteristic(currentCharacteristicUuid);
                         if (characteristic != null) {
                             boolean success = enableNotifications(gatt, characteristic);
@@ -894,15 +733,11 @@ public class BluetoothService {
         }
     };
 
-    // Подключение для отправки команд
     public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
-        // Устанавливаем маркер для режима команд
         this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
-        // Используем обычный connect
         connect(deviceAddress, serviceUuid, null);
     }
 
-    // Метод для отправки команды
     public boolean sendCommand(String command) {
         if (bluetoothGatt == null || writeCharacteristic == null || !isConnected.get()) {
             Log.e(TAG, "Cannot send command: not connected or characteristic not available");
@@ -910,13 +745,12 @@ public class BluetoothService {
         }
 
         try {
-            // Конвертируем команду в байты
             byte[] commandBytes = command.getBytes("UTF-8");
 
-            // Устанавливаем значение характеристики
-            writeCharacteristic.setValue(commandBytes);
+            Log.d(TAG, "Sending command: " + command);
+            Log.d(TAG, "Command bytes: " + java.util.Arrays.toString(commandBytes));
 
-            // Отправляем команду
+            writeCharacteristic.setValue(commandBytes);
             boolean result = bluetoothGatt.writeCharacteristic(writeCharacteristic);
 
             if (result) {
@@ -938,16 +772,13 @@ public class BluetoothService {
         servicesDiscovered.set(false);
         notificationsEnabled.set(false);
 
-        // Очищаем переменные для команд
         currentWriteCharacteristicUuid = null;
         writeCharacteristic = null;
 
-        // Обрабатываем оставшиеся данные в буфере
         if (bufferedBytesCount.get() > 0) {
             processDataBuffer();
         }
 
-        // Закрываем файл, если он открыт
         if (saveToFile.get()) {
             closeOutputFile();
         }
@@ -961,12 +792,10 @@ public class BluetoothService {
 
     private void handleReceivedData(byte[] data) {
         try {
-            // ПРИОРИТЕТ 1: Быстро сохраняем данные в большой буфер
             synchronized (receptionBuffer) {
                 receptionBuffer.write(data);
             }
 
-            // Обновляем статистику
             lastDataReceivedTime = System.currentTimeMillis();
             if (startReceivingTime == 0) {
                 startReceivingTime = lastDataReceivedTime;
@@ -975,20 +804,16 @@ public class BluetoothService {
             long totalBytes = totalBytesReceived.addAndGet(data.length);
             long totalPackets = totalPacketsReceived.incrementAndGet();
 
-            // Минимальное логирование только для критических пакетов
             if (totalPackets % 100 == 0) {
                 Log.d(TAG, "Received " + totalPackets + " packets, " + totalBytes + " bytes");
             }
 
-            // Проверяем на окончание передачи "End\r\n"
             checkForEndSequence(data);
 
-            // ОЧЕНЬ редкое обновление UI - только раз в 500мс
             long currentTime = System.currentTimeMillis();
             if (currentTime - lastUIUpdateTime > UI_UPDATE_INTERVAL || receptionComplete) {
                 lastUIUpdateTime = currentTime;
 
-                // Добавляем в очередь для обработки UI (НЕ блокируем прием)
                 dataProcessingExecutor.execute(() -> {
                     processDataForUI();
                 });
@@ -1000,7 +825,6 @@ public class BluetoothService {
     }
 
     private void checkForEndSequence(byte[] data) {
-        // Быстрая проверка на "End\r\n" без сложной обработки
         if (data.length >= 5) {
             int len = data.length;
             if (data[len-5] == 69 && data[len-4] == 110 && data[len-3] == 100 &&
@@ -1020,15 +844,12 @@ public class BluetoothService {
 
             if (allData.length == 0) return;
 
-            // Обрабатываем только небольшую порцию для UI (последние 8KB)
             int displayStart = Math.max(0, allData.length - MAX_DATA_DISPLAY_SIZE);
             byte[] displayData = new byte[allData.length - displayStart];
             System.arraycopy(allData, displayStart, displayData, 0, displayData.length);
 
-            // Форматируем данные
             String formattedData = formatDataBatch(displayData);
 
-            // Обновляем UI
             if (callback != null) {
                 long totalBytes = totalBytesReceived.get();
                 long duration = System.currentTimeMillis() - startReceivingTime;
@@ -1048,22 +869,6 @@ public class BluetoothService {
         }
     }
 
-    private void logReceivedData(byte[] data) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Received ").append(data.length).append(" bytes: ");
-
-        int logSize = Math.min(data.length, 32); // Логируем только первые 32 байта
-        for (int i = 0; i < logSize; i++) {
-            sb.append(String.format("%02X ", data[i] & 0xFF));
-        }
-        if (data.length > logSize) {
-            sb.append("...");
-        }
-
-        Log.d(DATA_TAG, sb.toString());
-    }
-
-    // Включение уведомлений для характеристики
     private boolean enableNotifications(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
         try {
             boolean success = gatt.setCharacteristicNotification(characteristic, true);
@@ -1074,7 +879,6 @@ public class BluetoothService {
 
             Log.d(TAG, "setCharacteristicNotification returned true");
 
-            // Записываем дескриптор для включения уведомлений
             UUID descriptorUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
             BluetoothGattDescriptor descriptor = characteristic.getDescriptor(descriptorUuid);
 
@@ -1093,11 +897,10 @@ public class BluetoothService {
         }
     }
 
-    // Отключение от устройства
     public void disconnect() {
         Log.d(TAG, "Disconnect requested");
         isConnecting.set(false);
-        reconnectAttempts.set(MAX_RECONNECT_ATTEMPTS); // Предотвращаем автоматические переподключения
+        reconnectAttempts.set(MAX_RECONNECT_ATTEMPTS);
 
         if (bluetoothGatt != null) {
             bluetoothGatt.disconnect();
@@ -1118,28 +921,22 @@ public class BluetoothService {
         }
     }
 
-    // Закрытие ресурсов
     public void close() {
         Log.d(TAG, "Closing BluetoothService");
 
-        // Отключаемся
         disconnect();
 
-        // Обработка оставшихся данных
         if (bufferedBytesCount.get() > 0) {
             processDataBuffer();
         }
 
-        // Закрытие файла
         if (saveToFile.get()) {
             closeOutputFile();
         }
 
-        // Остановка обработчиков
         mainHandler.removeCallbacksAndMessages(null);
         backgroundHandler.removeCallbacksAndMessages(null);
 
-        // Завершение пула потоков
         try {
             dataProcessingExecutor.shutdown();
             if (!dataProcessingExecutor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)) {
@@ -1151,30 +948,25 @@ public class BluetoothService {
         }
     }
 
-    // Метод для установки режима отображения
     public void setAsciiMode(boolean asciiMode) {
         this.asciiMode.set(asciiMode);
 
-        // Обрабатываем оставшиеся данные в буфере при изменении режима
         if (bufferedBytesCount.get() > 0) {
             processDataBuffer();
         }
     }
 
-    // Метод для сброса числового режима (например, при переподключении)
     public void resetNumericMode() {
         boolean wasNumeric = numericMode.getAndSet(false);
         sequenceBuffer.setLength(0);
         numericBuffer.clear();
         Log.d(TAG, "Numeric mode reset");
 
-        // Уведомляем о смене режима
         if (wasNumeric && callback != null) {
             mainHandler.post(() -> callback.onError("Reset to text mode - waiting for 'Start\\r\\n'"));
         }
     }
 
-    // Метод для принудительной активации числового режима
     public void forceNumericMode(boolean enable) {
         boolean wasNumeric = numericMode.getAndSet(enable);
         if (enable) {
@@ -1183,19 +975,16 @@ public class BluetoothService {
         }
         Log.d(TAG, "Numeric mode " + (enable ? "enabled" : "disabled") + " manually");
 
-        // Уведомляем о смене режима
         if (wasNumeric != enable && callback != null) {
             String message = enable ? "Forced numeric mode enabled" : "Numeric mode disabled - waiting for 'Start\\r\\n'";
             mainHandler.post(() -> callback.onError(message));
         }
     }
 
-    // Проверка текущего режима
     public boolean isNumericMode() {
         return numericMode.get();
     }
 
-    // Вспомогательные методы для уведомлений
     private void notifyError(String message) {
         if (callback != null) {
             mainHandler.post(() -> {
@@ -1232,13 +1021,11 @@ public class BluetoothService {
         }
     }
 
-    // Метод для принудительного переподключения
     public void forceReconnect() {
         Log.i(TAG, "Force reconnect requested");
         reconnectAttempts.set(0);
         disconnect();
 
-        // Небольшая задержка перед переподключением
         mainHandler.postDelayed(() -> {
             if (currentDeviceAddress != null && currentServiceUuid != null && currentCharacteristicUuid != null) {
                 connectInternal();
@@ -1246,14 +1033,12 @@ public class BluetoothService {
         }, 1000);
     }
 
-    // Получение полных данных после завершения приема
     public byte[] getCompleteReceivedData() {
         synchronized (receptionBuffer) {
             return receptionBuffer.toByteArray();
         }
     }
 
-    // Очистка буфера приема
     public void clearReceptionBuffer() {
         synchronized (receptionBuffer) {
             receptionBuffer.reset();
@@ -1262,7 +1047,6 @@ public class BluetoothService {
         lastUIUpdateTime = 0;
     }
 
-    // Проверка завершения приема
     public boolean isReceptionComplete() {
         return receptionComplete;
     }

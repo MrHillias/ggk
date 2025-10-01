@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -14,12 +15,11 @@ public class MTDeviceHandler {
 
     // UUIDs
     private static final UUID SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb");
-    // ВАЖНО: Используем ОДНУ характеристику для чтения И записи
     private static final UUID CHAR_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb");
 
-    // Константы
-    private static final long COMMAND_TIMEOUT = 3000;
-    private static final long COMMAND_DELAY = 500;
+    // Константы - увеличенные значения для стабильности
+    private static final long COMMAND_TIMEOUT = 5000; // Увеличено до 5 секунд
+    private static final long COMMAND_DELAY = 1000; // Увеличено до 1 секунды
     private static final String COMMAND_TERMINATOR = "\r";
 
     // Список команд для опроса
@@ -36,8 +36,8 @@ public class MTDeviceHandler {
     private final Handler mainHandler;
     private MTDeviceCallback callback;
 
-    private BluetoothService writeService;  // Для записи команд
-    private BluetoothService readService;   // Для чтения ответов
+    private BluetoothService writeService;
+    private BluetoothService readService;
 
     private String deviceAddress;
     private Map<String, String> deviceInfo;
@@ -60,7 +60,6 @@ public class MTDeviceHandler {
         void onProgress(int current, int total);
     }
 
-    // Конструктор
     public MTDeviceHandler(Context context, MTDeviceCallback callback) {
         this.context = context;
         this.callback = callback;
@@ -71,7 +70,6 @@ public class MTDeviceHandler {
         initializeBluetoothServices();
     }
 
-    // Инициализация Bluetooth сервисов
     private void initializeBluetoothServices() {
         // Сервис для ЗАПИСИ команд
         writeService = new BluetoothService(context);
@@ -116,6 +114,10 @@ public class MTDeviceHandler {
 
         // Сервис для ЧТЕНИЯ ответов
         readService = new BluetoothService(context);
+
+        // КРИТИЧЕСКИ ВАЖНО: Включаем режим чистого текста для MT устройств
+        readService.setRawTextMode(true);
+
         readService.setCallback(new BluetoothService.BluetoothCallback() {
             @Override
             public void onConnectionStateChange(boolean connected) {
@@ -144,6 +146,7 @@ public class MTDeviceHandler {
             @Override
             public void onDataBatch(String formattedBatch, long totalBytes, double kbPerSecond) {
                 Log.d(TAG, "onDataBatch - length: " + formattedBatch.length());
+                Log.d(TAG, "onDataBatch - content: [" + formattedBatch.replace("\r", "\\r").replace("\n", "\\n") + "]");
                 handleReceivedData(formattedBatch);
             }
 
@@ -159,17 +162,14 @@ public class MTDeviceHandler {
         });
     }
 
-    // Проверка готовности обоих сервисов
     private void checkBothReady() {
         if (writeReady && readReady && !isProcessing) {
             Log.d(TAG, "Both services ready!");
             notifyConnectionState(true);
-            // Задержка 1 секунда перед началом
             mainHandler.postDelayed(this::startCommandSequence, 1000);
         }
     }
 
-    // Подключение к устройству
     public void connect(String deviceAddress) {
         this.deviceAddress = deviceAddress;
         this.writeReady = false;
@@ -179,14 +179,10 @@ public class MTDeviceHandler {
 
         Log.d(TAG, "Connecting to device: " + deviceAddress);
 
-        // Подключаемся к fff1 ДВА РАЗА:
-        // 1. Для записи (находит WriteNoResponse)
         writeService.connectForCommands(deviceAddress, SERVICE_UUID, CHAR_UUID);
-        // 2. Для чтения (включает Notifications)
         readService.connect(deviceAddress, SERVICE_UUID, CHAR_UUID);
     }
 
-    // Начало последовательности команд
     private void startCommandSequence() {
         isProcessing = true;
         commandIndex = 0;
@@ -196,7 +192,6 @@ public class MTDeviceHandler {
         sendNextCommand();
     }
 
-    // Отправка следующей команды
     private void sendNextCommand() {
         if (commandIndex >= BASIC_COMMANDS.length) {
             finishCommandSequence();
@@ -206,7 +201,6 @@ public class MTDeviceHandler {
         currentCommand = BASIC_COMMANDS[commandIndex];
         responseBuffer.setLength(0);
 
-        // Проверка подключения
         if (!writeService.isConnected()) {
             Log.e(TAG, "Write service not connected");
             notifyError("Устройство отключилось");
@@ -214,9 +208,12 @@ public class MTDeviceHandler {
             return;
         }
 
-        // Отправка команды
         Log.d(TAG, "Sending command [" + (commandIndex + 1) + "/" + BASIC_COMMANDS.length + "]: " + currentCommand);
-        boolean sent = writeService.sendCommand(currentCommand + COMMAND_TERMINATOR);
+
+        String commandWithTerminator = currentCommand + COMMAND_TERMINATOR;
+        Log.d(TAG, "Command bytes: " + Arrays.toString(commandWithTerminator.getBytes()));
+
+        boolean sent = writeService.sendCommand(commandWithTerminator);
 
         if (sent) {
             notifyProgress(commandIndex + 1, BASIC_COMMANDS.length);
@@ -228,7 +225,6 @@ public class MTDeviceHandler {
         }
     }
 
-    // Запуск таймаута для команды
     private void startCommandTimeout() {
         cancelCommandTimeout();
 
@@ -241,7 +237,6 @@ public class MTDeviceHandler {
         mainHandler.postDelayed(timeoutRunnable, COMMAND_TIMEOUT);
     }
 
-    // Отмена таймаута
     private void cancelCommandTimeout() {
         if (timeoutRunnable != null) {
             mainHandler.removeCallbacks(timeoutRunnable);
@@ -249,7 +244,6 @@ public class MTDeviceHandler {
         }
     }
 
-    // Обработка полученных данных
     private void handleReceivedData(String data) {
         Log.d(TAG, "handleReceivedData called with data length: " + data.length());
         Log.d(TAG, "Data content: [" + data.replace("\r", "\\r").replace("\n", "\\n") + "]");
@@ -263,51 +257,84 @@ public class MTDeviceHandler {
         String bufferContent = responseBuffer.toString();
 
         Log.d(TAG, "Buffer content: [" + bufferContent.replace("\r", "\\r").replace("\n", "\\n") + "]");
+        Log.d(TAG, "Current buffer length: " + bufferContent.length());
 
-        // Проверяем окончание ответа
-        if (bufferContent.contains("\r") || bufferContent.contains("\n")) {
+        // Проверяем окончание ответа - ищем \r, \n или их комбинацию
+        boolean hasTerminator = bufferContent.contains("\r") || bufferContent.contains("\n");
+
+        // Также проверяем, не пришел ли весь ответ уже (некоторые устройства могут не отправлять терминатор)
+        // Если прошло достаточно данных, считаем ответ полным
+        boolean hasEnoughData = bufferContent.length() > 5;
+
+        // Дополнительная проверка: если данные выглядят как законченный ответ (содержат пробелы и символы)
+        boolean looksComplete = bufferContent.length() > 3 &&
+                (bufferContent.contains(" ") || bufferContent.matches(".*[A-Za-z0-9]+.*"));
+
+        if (hasTerminator || (hasEnoughData && looksComplete)) {
             cancelCommandTimeout();
 
-            // Очищаем ответ
+            // Очищаем ответ от всех управляющих символов
             String response = bufferContent
                     .replace("\r", "")
                     .replace("\n", "")
                     .trim();
 
-            Log.d(TAG, "Received response for " + currentCommand + ": " + response);
+            Log.d(TAG, "Received complete response for " + currentCommand + ": " + response);
 
             saveResponse(currentCommand, response);
             moveToNextCommand();
         } else {
-            Log.d(TAG, "No terminator found yet, waiting for more data");
+            Log.d(TAG, "Waiting for more data or terminator (current length: " + bufferContent.length() + ")");
+
+            // Устанавливаем короткий таймер для завершения приема, если больше данных не будет
+            mainHandler.postDelayed(() -> {
+                if (isProcessing && currentCommand != null && responseBuffer.length() > 0) {
+                    Log.d(TAG, "Force completing response after delay");
+                    cancelCommandTimeout();
+
+                    String response = responseBuffer.toString()
+                            .replace("\r", "")
+                            .replace("\n", "")
+                            .trim();
+
+                    if (!response.isEmpty()) {
+                        Log.d(TAG, "Force completed response for " + currentCommand + ": " + response);
+                        saveResponse(currentCommand, response);
+                        moveToNextCommand();
+                    }
+                }
+            }, 500); // Ждем еще 500мс для дополнительных данных
         }
     }
 
-    // Сохранение ответа
     private void saveResponse(String command, String response) {
         deviceInfo.put(command, response);
         notifyCommandResponse(command, response);
     }
 
-    // Переход к следующей команде
     private void moveToNextCommand() {
         commandIndex++;
+        responseBuffer.setLength(0); // Очищаем буфер перед следующей командой
         mainHandler.postDelayed(this::sendNextCommand, COMMAND_DELAY);
     }
 
-    // Завершение последовательности команд
     private void finishCommandSequence() {
         isProcessing = false;
         cancelCommandTimeout();
 
         Log.d(TAG, "Command sequence finished. Collected " + deviceInfo.size() + " responses");
+
+        // Выводим все полученные ответы
+        for (Map.Entry<String, String> entry : deviceInfo.entrySet()) {
+            Log.d(TAG, "Final result - " + entry.getKey() + ": " + entry.getValue());
+        }
+
         notifyDeviceInfoReady();
     }
 
-    // Обработка отключения
     private void handleDisconnection() {
         if (writeReady || readReady) {
-            return; // Только одно отключилось
+            return;
         }
 
         isProcessing = false;
@@ -315,7 +342,6 @@ public class MTDeviceHandler {
         notifyConnectionState(false);
     }
 
-    // Запрос данных
     public void requestData() {
         if (writeService != null && writeService.isConnected()) {
             Log.d(TAG, "Requesting data");
@@ -325,7 +351,6 @@ public class MTDeviceHandler {
         }
     }
 
-    // Изменение диапазона
     public void setRange(int rangeValue) {
         if (writeService != null && writeService.isConnected()) {
             String command = "Ranges " + rangeValue + COMMAND_TERMINATOR;
@@ -336,7 +361,6 @@ public class MTDeviceHandler {
         }
     }
 
-    // Отключение
     public void disconnect() {
         Log.d(TAG, "Disconnecting");
         cancelCommandTimeout();
@@ -353,7 +377,6 @@ public class MTDeviceHandler {
         readReady = false;
     }
 
-    // Очистка ресурсов
     public void cleanup() {
         Log.d(TAG, "Cleanup");
         disconnect();
@@ -370,7 +393,6 @@ public class MTDeviceHandler {
         mainHandler.removeCallbacksAndMessages(null);
     }
 
-    // Вспомогательные методы для уведомлений
     private void notifyConnectionState(boolean connected) {
         if (callback != null) {
             mainHandler.post(() -> callback.onConnectionStateChanged(connected));
