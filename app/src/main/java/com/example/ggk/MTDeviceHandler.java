@@ -1,47 +1,57 @@
 package com.example.ggk;
 
-import static androidx.core.app.PendingIntentCompat.getActivity;
-import static androidx.core.content.ContentProviderCompat.requireContext;
-
-import android.app.Activity;
-import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
-import android.widget.Toast;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 public class MTDeviceHandler {
-    boolean firstTime = true;
     private static final String TAG = "MTDeviceHandler";
-    private static final UUID SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb");
-    private static final UUID WRITE_UUID = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
-    private static final UUID READ_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb");
 
-    private static final long COMMAND_TIMEOUT = 3000; // 3 секунды на ответ
+    // UUIDs
+    private static final UUID SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb");
+    // ВАЖНО: Используем ОДНУ характеристику для чтения И записи
+    private static final UUID CHAR_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb");
+
+    // Константы
+    private static final long COMMAND_TIMEOUT = 3000;
+    private static final long COMMAND_DELAY = 500;
     private static final String COMMAND_TERMINATOR = "\r";
 
+    // Список команд для опроса
+    private static final String[] BASIC_COMMANDS = {
+            "DataSize?",
+            "WorkTime?",
+            "Idn?",
+            "PmaxAllTime?",
+            "Pminmax24?"
+    };
+
+    // Поля класса
     private final Context context;
-    private final BluetoothService bluetoothService;
     private final Handler mainHandler;
     private MTDeviceCallback callback;
 
-    private List<String> supportedCommands = new ArrayList<>();
-    private Map<String, String> deviceInfo = new HashMap<>();
-    private StringBuilder responseBuffer = new StringBuilder();
-    private String currentCommand = null;
-    private int commandIndex = 0;
-    private boolean isProcessing = false;
+    private BluetoothService writeService;  // Для записи команд
+    private BluetoothService readService;   // Для чтения ответов
+
+    private String deviceAddress;
+    private Map<String, String> deviceInfo;
+    private StringBuilder responseBuffer;
+
+    private int commandIndex;
+    private String currentCommand;
+    private boolean isProcessing;
+    private volatile boolean writeReady;
+    private volatile boolean readReady;
 
     private Runnable timeoutRunnable;
 
+    // Интерфейс callback
     public interface MTDeviceCallback {
         void onConnectionStateChanged(boolean connected);
         void onDeviceInfoReady(Map<String, String> deviceInfo);
@@ -50,301 +60,344 @@ public class MTDeviceHandler {
         void onProgress(int current, int total);
     }
 
+    // Конструктор
     public MTDeviceHandler(Context context, MTDeviceCallback callback) {
         this.context = context;
         this.callback = callback;
         this.mainHandler = new Handler(Looper.getMainLooper());
-        this.bluetoothService = new BluetoothService(context);
+        this.deviceInfo = new HashMap<>();
+        this.responseBuffer = new StringBuilder();
 
-        setupBluetoothCallbacks();
+        initializeBluetoothServices();
     }
 
-    private void setupBluetoothCallbacks() {
-        bluetoothService.setCallback(new BluetoothService.BluetoothCallback() {
+    // Инициализация Bluetooth сервисов
+    private void initializeBluetoothServices() {
+        // Сервис для ЗАПИСИ команд
+        writeService = new BluetoothService(context);
+        writeService.setCallback(new BluetoothService.BluetoothCallback() {
             @Override
             public void onConnectionStateChange(boolean connected) {
-                if (connected && !isProcessing) {
-                    // Начинаем с команды Help
-                    startCommandSequence();
+                Log.d(TAG, "Write service connection: " + connected);
+                if (!connected) {
+                    writeReady = false;
+                    handleDisconnection();
                 }
-                callback.onConnectionStateChanged(connected);
             }
 
             @Override
             public void onServicesDiscovered(boolean success) {
-                if (!success) {
-                    callback.onError("Не удалось обнаружить сервисы");
+                Log.d(TAG, "Write services discovered: " + success);
+                if (success) {
+                    Log.d(TAG, "Write service ready");
+                    writeReady = true;
+                    checkBothReady();
+                } else {
+                    notifyError("Не удалось настроить запись");
                 }
             }
 
             @Override
-            public void onDataReceived(byte[] data, String formattedData) {
-                processReceivedData(new String(data));
+            public void onDataReceived(byte[] data, String formattedData) {}
+
+            @Override
+            public void onDataBatch(String formattedBatch, long totalBytes, double kbPerSecond) {}
+
+            @Override
+            public void onError(String message) {
+                if (!message.contains("MTU") && !message.contains("Notifications")) {
+                    Log.e(TAG, "Write error: " + message);
+                }
             }
 
             @Override
+            public void onReconnectAttempt(int attempt, int maxAttempts) {}
+        });
+
+        // Сервис для ЧТЕНИЯ ответов
+        readService = new BluetoothService(context);
+        readService.setCallback(new BluetoothService.BluetoothCallback() {
+            @Override
+            public void onConnectionStateChange(boolean connected) {
+                Log.d(TAG, "Read service connection: " + connected);
+                if (!connected) {
+                    readReady = false;
+                    handleDisconnection();
+                }
+            }
+
+            @Override
+            public void onServicesDiscovered(boolean success) {
+                Log.d(TAG, "Read services discovered: " + success);
+                if (success) {
+                    Log.d(TAG, "Read service ready");
+                    readReady = true;
+                    checkBothReady();
+                } else {
+                    notifyError("Не удалось настроить чтение");
+                }
+            }
+
+            @Override
+            public void onDataReceived(byte[] data, String formattedData) {}
+
+            @Override
             public void onDataBatch(String formattedBatch, long totalBytes, double kbPerSecond) {
-                // Не используется для командного режима
+                Log.d(TAG, "onDataBatch - length: " + formattedBatch.length());
+                handleReceivedData(formattedBatch);
             }
 
             @Override
             public void onError(String message) {
-                callback.onError(message);
+                if (!message.contains("MTU") && !message.contains("Notifications")) {
+                    Log.e(TAG, "Read error: " + message);
+                }
             }
 
             @Override
-            public void onReconnectAttempt(int attempt, int maxAttempts) {
-                // Обработка переподключения при необходимости
-            }
+            public void onReconnectAttempt(int attempt, int maxAttempts) {}
         });
     }
 
-    public void connect(String deviceAddress) {
-        bluetoothService.connectForCommands(deviceAddress, SERVICE_UUID, WRITE_UUID);
-    }
-
-    private void startCommandSequence() {
-        isProcessing = true;
-        responseBuffer.setLength(0);
-        sendCommand("Help");
-    }
-
-    private void sendCommand(String command) {
-        currentCommand = command;
-        responseBuffer.setLength(0);
-
-        Log.d(TAG, "Sending command: " + command);
-        boolean sent = bluetoothService.sendCommand(command + COMMAND_TERMINATOR);
-
-        if (sent) {
-            startTimeout();
-        } else {
-            callback.onError("Не удалось отправить команду: " + command);
-            processNextCommand();
+    // Проверка готовности обоих сервисов
+    private void checkBothReady() {
+        if (writeReady && readReady && !isProcessing) {
+            Log.d(TAG, "Both services ready!");
+            notifyConnectionState(true);
+            // Задержка 1 секунда перед началом
+            mainHandler.postDelayed(this::startCommandSequence, 1000);
         }
     }
 
-    private void startTimeout() {
-        cancelTimeout();
+    // Подключение к устройству
+    public void connect(String deviceAddress) {
+        this.deviceAddress = deviceAddress;
+        this.writeReady = false;
+        this.readReady = false;
+        this.isProcessing = false;
+        this.deviceInfo.clear();
+
+        Log.d(TAG, "Connecting to device: " + deviceAddress);
+
+        // Подключаемся к fff1 ДВА РАЗА:
+        // 1. Для записи (находит WriteNoResponse)
+        writeService.connectForCommands(deviceAddress, SERVICE_UUID, CHAR_UUID);
+        // 2. Для чтения (включает Notifications)
+        readService.connect(deviceAddress, SERVICE_UUID, CHAR_UUID);
+    }
+
+    // Начало последовательности команд
+    private void startCommandSequence() {
+        isProcessing = true;
+        commandIndex = 0;
+        deviceInfo.clear();
+
+        Log.d(TAG, "Starting command sequence with " + BASIC_COMMANDS.length + " commands");
+        sendNextCommand();
+    }
+
+    // Отправка следующей команды
+    private void sendNextCommand() {
+        if (commandIndex >= BASIC_COMMANDS.length) {
+            finishCommandSequence();
+            return;
+        }
+
+        currentCommand = BASIC_COMMANDS[commandIndex];
+        responseBuffer.setLength(0);
+
+        // Проверка подключения
+        if (!writeService.isConnected()) {
+            Log.e(TAG, "Write service not connected");
+            notifyError("Устройство отключилось");
+            isProcessing = false;
+            return;
+        }
+
+        // Отправка команды
+        Log.d(TAG, "Sending command [" + (commandIndex + 1) + "/" + BASIC_COMMANDS.length + "]: " + currentCommand);
+        boolean sent = writeService.sendCommand(currentCommand + COMMAND_TERMINATOR);
+
+        if (sent) {
+            notifyProgress(commandIndex + 1, BASIC_COMMANDS.length);
+            startCommandTimeout();
+        } else {
+            Log.e(TAG, "Failed to send command: " + currentCommand);
+            saveResponse(currentCommand, "ERROR");
+            moveToNextCommand();
+        }
+    }
+
+    // Запуск таймаута для команды
+    private void startCommandTimeout() {
+        cancelCommandTimeout();
+
         timeoutRunnable = () -> {
             Log.w(TAG, "Timeout for command: " + currentCommand);
-            handleCommandResponse(currentCommand, "TIMEOUT");
-            processNextCommand();
+            saveResponse(currentCommand, "TIMEOUT");
+            moveToNextCommand();
         };
+
         mainHandler.postDelayed(timeoutRunnable, COMMAND_TIMEOUT);
     }
 
-    private void cancelTimeout() {
+    // Отмена таймаута
+    private void cancelCommandTimeout() {
         if (timeoutRunnable != null) {
             mainHandler.removeCallbacks(timeoutRunnable);
             timeoutRunnable = null;
         }
     }
 
-    private void processReceivedData(String data) {
-        responseBuffer.append(data);
+    // Обработка полученных данных
+    private void handleReceivedData(String data) {
+        Log.d(TAG, "handleReceivedData called with data length: " + data.length());
+        Log.d(TAG, "Data content: [" + data.replace("\r", "\\r").replace("\n", "\\n") + "]");
 
-        // Проверяем, получен ли полный ответ
-        if (responseBuffer.toString().contains(COMMAND_TERMINATOR)) {
-            cancelTimeout();
-            String response = responseBuffer.toString().replace(COMMAND_TERMINATOR, "").trim();
+        if (!isProcessing || currentCommand == null) {
+            Log.w(TAG, "Ignoring data - not processing or no current command");
+            return;
+        }
+
+        responseBuffer.append(data);
+        String bufferContent = responseBuffer.toString();
+
+        Log.d(TAG, "Buffer content: [" + bufferContent.replace("\r", "\\r").replace("\n", "\\n") + "]");
+
+        // Проверяем окончание ответа
+        if (bufferContent.contains("\r") || bufferContent.contains("\n")) {
+            cancelCommandTimeout();
+
+            // Очищаем ответ
+            String response = bufferContent
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .trim();
 
             Log.d(TAG, "Received response for " + currentCommand + ": " + response);
 
-            if ("Help".equals(currentCommand)) {
-                parseHelpResponse(response);
-            } else {
-                handleCommandResponse(currentCommand, response);
-            }
-
-            processNextCommand();
-        }
-    }
-
-    private void parseHelpResponse(String response) {
-        // Парсим список поддерживаемых команд
-        supportedCommands.clear();
-        String[] commands = response.split("\\s+");
-
-        for (String cmd : commands) {
-            if (cmd.endsWith("?")) {
-                supportedCommands.add(cmd);
-            }
-        }
-
-        Log.d(TAG, "Supported commands: " + supportedCommands);
-        commandIndex = 0;
-    }
-
-    private void processNextCommand() {
-        if (commandIndex < supportedCommands.size()) {
-            String nextCommand = supportedCommands.get(commandIndex);
-            commandIndex++;
-
-            // Обновляем прогресс
-            callback.onProgress(commandIndex, supportedCommands.size());
-
-            // Отправляем следующую команду
-            sendCommand(nextCommand);
+            saveResponse(currentCommand, response);
+            moveToNextCommand();
         } else {
-            // Все команды обработаны
-            isProcessing = false;
-            callback.onDeviceInfoReady(deviceInfo);
+            Log.d(TAG, "No terminator found yet, waiting for more data");
         }
     }
 
-    private void handleCommandResponse(String command, String response) {
-        // Сохраняем ответ
+    // Сохранение ответа
+    private void saveResponse(String command, String response) {
         deviceInfo.put(command, response);
-
-        // Уведомляем о получении ответа
-        callback.onCommandResponse(command, response);
-
-        // Специальная обработка для известных команд
-        parseSpecialCommands(command, response);
+        notifyCommandResponse(command, response);
     }
 
-    private void parseSpecialCommands(String command, String response) {
-        switch (command) {
-            case "DataSize?":
-                // Парсим размер данных
-                try {
-                    int dataSize = Integer.parseInt(response);
-                    deviceInfo.put("dataSize", String.valueOf(dataSize));
-                } catch (NumberFormatException e) {
-                    Log.e(TAG, "Failed to parse DataSize: " + response);
-                }
-                break;
+    // Переход к следующей команде
+    private void moveToNextCommand() {
+        commandIndex++;
+        mainHandler.postDelayed(this::sendNextCommand, COMMAND_DELAY);
+    }
 
-            case "Time?":
-                // Парсим время устройства
-                deviceInfo.put("deviceTime", response);
-                break;
+    // Завершение последовательности команд
+    private void finishCommandSequence() {
+        isProcessing = false;
+        cancelCommandTimeout();
 
-            case "Units?":
-                // Парсим текущие единицы измерения
-                deviceInfo.put("currentUnits", response);
-                break;
+        Log.d(TAG, "Command sequence finished. Collected " + deviceInfo.size() + " responses");
+        notifyDeviceInfoReady();
+    }
 
-            case "Range?":
-                // Парсим текущий диапазон
-                deviceInfo.put("currentRange", response);
-                break;
-
-            case "Ranges?":
-                // Парсим диапазоны (формат: "Ranges X")
-                deviceInfo.put("ranges", response);
-                // Извлекаем числовое значение
-                String rangeValue = extractNumericValue(response);
-                if (rangeValue != null) {
-                    deviceInfo.put("rangesValue", rangeValue);
-                }
-                break;
-
-            case "MeasureFreq?":
-                // Парсим частоту измерений
-                deviceInfo.put("measureFrequency", response);
-                break;
-
-            case "Idn?":
-                // Парсим идентификатор устройства
-                deviceInfo.put("deviceId", response);
-                break;
-
-            // Добавьте обработку других команд по мере необходимости
+    // Обработка отключения
+    private void handleDisconnection() {
+        if (writeReady || readReady) {
+            return; // Только одно отключилось
         }
+
+        isProcessing = false;
+        cancelCommandTimeout();
+        notifyConnectionState(false);
     }
 
-    // Вспомогательный метод для извлечения числового значения из ответа
-    private String extractNumericValue(String response) {
-        String[] parts = response.trim().split("\\s+");
-        for (String part : parts) {
-            try {
-                Integer.parseInt(part);
-                return part;
-            } catch (NumberFormatException e) {
-                // Продолжаем поиск числа
-            }
-        }
-        return null;
-    }
-
-    public void disconnect() {
-        cancelTimeout();
-        if (bluetoothService != null) {
-            bluetoothService.disconnect();
-        }
-    }
-
-    public void cleanup() {
-        cancelTimeout();
-        if (bluetoothService != null) {
-            bluetoothService.close();
-        }
-    }
-
-    // Метод для получения данных после настройки
+    // Запрос данных
     public void requestData() {
-        if (bluetoothService != null && bluetoothService.isConnected()) {
-            sendCommand("Ranges 1");
+        if (writeService != null && writeService.isConnected()) {
+            Log.d(TAG, "Requesting data");
+            writeService.sendCommand("Data?\r");
         } else {
-            callback.onError("Устройство не подключено");
+            notifyError("Устройство не подключено");
         }
     }
 
-    // Метод для отправки команды изменения диапазона
-    public void setRange(int rangeValue, MTDeviceCallback callback) {
-        if (bluetoothService != null && bluetoothService.isConnected()) {
-            String command = "Ranges " + rangeValue;
+    // Изменение диапазона
+    public void setRange(int rangeValue) {
+        if (writeService != null && writeService.isConnected()) {
+            String command = "Ranges " + rangeValue + COMMAND_TERMINATOR;
             Log.d(TAG, "Sending range command: " + command);
-            bluetoothService.sendCommand(command + COMMAND_TERMINATOR);
-
-            if (callback != null) {
-                // Временный callback для обработки ответа на команду изменения
-                this.callback = callback;
-            }
+            writeService.sendCommand(command);
         } else {
-            if (callback != null) {
-                callback.onError("Устройство не подключено");
-            }
+            notifyError("Устройство не подключено");
         }
     }
 
-    // Вспомогательный класс для хранения информации о команде
-    public static class CommandInfo {
-        public final String command;
-        public final String displayName;
-        public final String description;
-        public final boolean isRequired;
+    // Отключение
+    public void disconnect() {
+        Log.d(TAG, "Disconnecting");
+        cancelCommandTimeout();
 
-        public CommandInfo(String command, String displayName, String description, boolean isRequired) {
-            this.command = command;
-            this.displayName = displayName;
-            this.description = description;
-            this.isRequired = isRequired;
+        if (writeService != null) {
+            writeService.disconnect();
+        }
+        if (readService != null) {
+            readService.disconnect();
+        }
+
+        isProcessing = false;
+        writeReady = false;
+        readReady = false;
+    }
+
+    // Очистка ресурсов
+    public void cleanup() {
+        Log.d(TAG, "Cleanup");
+        disconnect();
+
+        if (writeService != null) {
+            writeService.close();
+            writeService = null;
+        }
+        if (readService != null) {
+            readService.close();
+            readService = null;
+        }
+
+        mainHandler.removeCallbacksAndMessages(null);
+    }
+
+    // Вспомогательные методы для уведомлений
+    private void notifyConnectionState(boolean connected) {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onConnectionStateChanged(connected));
         }
     }
 
-    // Предопределенные команды с описаниями
-    private static final Map<String, CommandInfo> KNOWN_COMMANDS = new HashMap<>();
-    static {
-        KNOWN_COMMANDS.put("DataSize?", new CommandInfo("DataSize?", "Размер данных", "Количество сохраненных измерений", true));
-        KNOWN_COMMANDS.put("Time?", new CommandInfo("Time?", "Время", "Текущее время устройства", true));
-        KNOWN_COMMANDS.put("Broadcast?", new CommandInfo("Broadcast?", "Режим вещания", "Статус режима передачи", false));
-        KNOWN_COMMANDS.put("Units?", new CommandInfo("Units?", "Единицы измерения", "Текущие единицы измерения", true));
-        KNOWN_COMMANDS.put("UnitsAll?", new CommandInfo("UnitsAll?", "Все единицы", "Поддерживаемые единицы измерения", false));
-        KNOWN_COMMANDS.put("Range?", new CommandInfo("Range?", "Диапазон", "Текущий диапазон измерений", true));
-        KNOWN_COMMANDS.put("Ranges?", new CommandInfo("Ranges?", "Диапазоны", "Управление диапазонами измерений", true));
-        KNOWN_COMMANDS.put("RangeAll?", new CommandInfo("RangeAll?", "Все диапазоны", "Поддерживаемые диапазоны", false));
-        KNOWN_COMMANDS.put("MeasureFreq?", new CommandInfo("MeasureFreq?", "Частота измерений", "Частота снятия показаний", true));
-        KNOWN_COMMANDS.put("RecordFreq?", new CommandInfo("RecordFreq?", "Частота записи", "Частота сохранения данных", false));
-        KNOWN_COMMANDS.put("Filter?", new CommandInfo("Filter?", "Фильтр", "Настройки фильтрации", false));
-        KNOWN_COMMANDS.put("Idn?", new CommandInfo("Idn?", "Идентификатор", "Модель и серийный номер", true));
-        KNOWN_COMMANDS.put("PmaxAllTime?", new CommandInfo("PmaxAllTime?", "Макс. давление", "Максимальное давление за все время", false));
-        KNOWN_COMMANDS.put("Pminmax24?", new CommandInfo("Pminmax24?", "Мин/Макс 24ч", "Минимальное и максимальное за 24 часа", false));
+    private void notifyDeviceInfoReady() {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onDeviceInfoReady(new HashMap<>(deviceInfo)));
+        }
     }
 
-    public static CommandInfo getCommandInfo(String command) {
-        return KNOWN_COMMANDS.get(command);
+    private void notifyCommandResponse(String command, String response) {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onCommandResponse(command, response));
+        }
+    }
+
+    private void notifyError(String message) {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onError(message));
+        }
+    }
+
+    private void notifyProgress(int current, int total) {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onProgress(current, total));
+        }
     }
 }

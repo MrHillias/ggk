@@ -11,11 +11,10 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.cardview.widget.CardView;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.chip.Chip;
+import com.google.android.material.card.MaterialCardView;
 
 import java.util.Map;
 
@@ -103,11 +102,7 @@ public class MTDeviceInfoFragment extends Fragment {
 
             @Override
             public void onCommandResponse(String command, String response) {
-                if (getActivity() == null) return;
-                getActivity().runOnUiThread(() -> {
-                    // Можно показывать промежуточные результаты
-                    addInfoCard(command, response, false);
-                });
+                // Можно показывать промежуточные результаты, но пока пропускаем
             }
 
             @Override
@@ -124,7 +119,7 @@ public class MTDeviceInfoFragment extends Fragment {
             public void onProgress(int current, int total) {
                 if (getActivity() == null) return;
                 getActivity().runOnUiThread(() -> {
-                    progressText.setText(String.format("Обработка команд: %d/%d", current, total));
+                    progressText.setText(String.format("Обработка: %d/%d", current, total));
                     progressBar.setMax(total);
                     progressBar.setProgress(current);
                 });
@@ -137,175 +132,115 @@ public class MTDeviceInfoFragment extends Fragment {
     private void displayDeviceInfo(Map<String, String> deviceInfo) {
         infoContainer.removeAllViews();
 
-        // Группируем информацию по категориям
-        addCategoryHeader("Основная информация");
-        addInfoIfExists(deviceInfo, "Idn?", "Идентификатор");
-        addInfoIfExists(deviceInfo, "deviceTime", "Время устройства");
-        addInfoIfExists(deviceInfo, "DataSize?", "Размер данных");
-
-        addCategoryHeader("Настройки измерений");
-        addInfoIfExists(deviceInfo, "Units?", "Единицы измерения");
-        addInfoIfExists(deviceInfo, "UnitsAll?", "Доступные единицы");
-        addInfoIfExists(deviceInfo, "Range?", "Текущий диапазон");
-        addInfoIfExists(deviceInfo, "RangeAll?", "Доступные диапазоны");
-
-        // Специальная обработка для Ranges с кнопкой
-        String rangesResponse = deviceInfo.get("Ranges?");
-        if (rangesResponse != null && !rangesResponse.equals("TIMEOUT")) {
-            addRangesCard(rangesResponse, deviceInfo.get("rangesValue"));
+        // DataSize - Заполнено памяти
+        String dataSize = deviceInfo.get("DataSize?");
+        if (dataSize != null && !dataSize.equals("TIMEOUT")) {
+            addInfoCard("Заполнено памяти",
+                    formatDataSize(dataSize),
+                    "Количество записанных измерений с момента включения");
         }
 
-        addCategoryHeader("Частота и фильтрация");
-        addInfoIfExists(deviceInfo, "MeasureFreq?", "Частота измерений");
-        addInfoIfExists(deviceInfo, "RecordFreq?", "Частота записи");
-        addInfoIfExists(deviceInfo, "Filter?", "Настройки фильтра");
+        // WorkTime - Время работы
+        String workTime = deviceInfo.get("WorkTime?");
+        if (workTime != null && !workTime.equals("TIMEOUT")) {
+            addInfoCard("Время работы",
+                    formatWorkTime(workTime),
+                    "Время с момента включения прибора");
+        }
 
-        addCategoryHeader("Статистика");
-        addInfoIfExists(deviceInfo, "PmaxAllTime?", "Максимальное давление");
-        addInfoIfExists(deviceInfo, "Pminmax24?", "Мин/Макс за 24ч");
+        // Idn - Серийный номер
+        String idn = deviceInfo.get("Idn?");
+        if (idn != null && !idn.equals("TIMEOUT")) {
+            addInfoCard("Серийный номер",
+                    idn,
+                    "Модель и идентификатор устройства");
+        }
 
-        addCategoryHeader("Режимы работы");
-        addInfoIfExists(deviceInfo, "Broadcast?", "Режим вещания");
+        // PmaxAllTime - Максимальное давление
+        String pmaxAllTime = deviceInfo.get("PmaxAllTime?");
+        if (pmaxAllTime != null && !pmaxAllTime.equals("TIMEOUT")) {
+            addInfoCard("Максимальное давление",
+                    formatPressure(pmaxAllTime),
+                    "Максимальное значение за все время работы");
+        }
 
-        // Показываем неизвестные команды в отдельной секции
-        addCategoryHeader("Дополнительная информация");
-        for (Map.Entry<String, String> entry : deviceInfo.entrySet()) {
-            String command = entry.getKey();
-            if (!isKnownCommand(command) && !isInternalKey(command)) {
-                addInfoCard(command, entry.getValue(), true);
-            }
+        // Pminmax24 - Мин/Макс за 24 часа
+        String pminmax24 = deviceInfo.get("Pminmax24?");
+        if (pminmax24 != null && !pminmax24.equals("TIMEOUT")) {
+            addInfoCard("Давление за 24 часа",
+                    formatMinMax24(pminmax24),
+                    "Минимальное и максимальное значения");
         }
     }
 
-    private void addRangesCard(String rangesResponse, String rangesValue) {
+    private void addInfoCard(String title, String value, String description) {
         View cardView = LayoutInflater.from(getContext())
-                .inflate(R.layout.item_device_ranges_card, infoContainer, false);
+                .inflate(R.layout.item_mt_info_card, infoContainer, false);
 
         TextView titleText = cardView.findViewById(R.id.info_title);
         TextView valueText = cardView.findViewById(R.id.info_value);
-        TextView rangesValueText = cardView.findViewById(R.id.ranges_value_text);
-        com.google.android.material.button.MaterialButton changeButton =
-                cardView.findViewById(R.id.change_range_button);
-
-        titleText.setText("Диапазоны");
-        valueText.setText(rangesResponse);
-
-        if (rangesValue != null) {
-            rangesValueText.setVisibility(View.VISIBLE);
-            rangesValueText.setText("Текущее значение: " + rangesValue);
-        } else {
-            rangesValueText.setVisibility(View.GONE);
-        }
-
-        changeButton.setOnClickListener(v -> {
-            MTRangesDialog dialog = MTRangesDialog.newInstance(deviceAddress, rangesResponse);
-            dialog.setTargetFragment(this, 0);
-            dialog.show(getParentFragmentManager(), "ranges_dialog");
-        });
-
-        infoContainer.addView(cardView);
-    }
-
-    public void refreshInfo() {
-        // Метод для обновления информации после изменения диапазона
-        connectAndGetInfo();
-    }
-
-    private boolean isKnownCommand(String command) {
-        return MTDeviceHandler.getCommandInfo(command) != null;
-    }
-
-    private boolean isInternalKey(String key) {
-        return key.equals("deviceTime") || key.equals("dataSize") ||
-                key.equals("currentUnits") || key.equals("currentRange") ||
-                key.equals("measureFrequency") || key.equals("deviceId") ||
-                key.equals("rangesValue") || key.equals("ranges");
-    }
-
-    private void addInfoIfExists(Map<String, String> deviceInfo, String key, String displayName) {
-        String value = deviceInfo.get(key);
-        if (value != null && !value.equals("TIMEOUT")) {
-            addInfoCard(displayName, formatValue(key, value), false);
-        }
-    }
-
-    private String formatValue(String key, String value) {
-        // Форматируем значения в зависимости от типа команды
-        switch (key) {
-            case "DataSize?":
-                try {
-                    int size = Integer.parseInt(value);
-                    return size + " измерений";
-                } catch (NumberFormatException e) {
-                    return value;
-                }
-
-            case "MeasureFreq?":
-            case "RecordFreq?":
-                if (value.matches("\\d+")) {
-                    return value + " Гц";
-                }
-                return value;
-
-            case "Units?":
-                return translateUnits(value);
-
-            case "Broadcast?":
-                return value.equals("1") || value.equalsIgnoreCase("on") ? "Включен" : "Выключен";
-
-            default:
-                return value;
-        }
-    }
-
-    private String translateUnits(String units) {
-        // Переводим единицы измерения если нужно
-        switch (units.toUpperCase()) {
-            case "PA": return "Паскали";
-            case "KPA": return "Килопаскали";
-            case "BAR": return "Бары";
-            case "PSI": return "PSI";
-            case "MMHG": return "мм рт.ст.";
-            default: return units;
-        }
-    }
-
-    private void addCategoryHeader(String title) {
-        TextView header = new TextView(getContext());
-        header.setText(title);
-        header.setTextSize(16);
-        header.setTextColor(getResources().getColor(R.color.md_theme_primary));
-        header.setPadding(0, 24, 0, 8);
-        header.setTypeface(header.getTypeface(), android.graphics.Typeface.BOLD);
-        infoContainer.addView(header);
-    }
-
-    private void addInfoCard(String title, String value, boolean isUnknown) {
-        View cardView = LayoutInflater.from(getContext())
-                .inflate(R.layout.item_device_info_card, infoContainer, false);
-
-        TextView titleText = cardView.findViewById(R.id.info_title);
-        TextView valueText = cardView.findViewById(R.id.info_value);
-        Chip statusChip = cardView.findViewById(R.id.status_chip);
+        TextView descText = cardView.findViewById(R.id.info_description);
 
         titleText.setText(title);
         valueText.setText(value);
-
-        if (value.equals("TIMEOUT")) {
-            valueText.setText("Нет ответа");
-            valueText.setTextColor(getResources().getColor(R.color.bluetooth_disconnected));
-            statusChip.setVisibility(View.VISIBLE);
-            statusChip.setText("Timeout");
-            statusChip.setChipBackgroundColorResource(R.color.bluetooth_disconnected);
-        } else if (isUnknown) {
-            statusChip.setVisibility(View.VISIBLE);
-            statusChip.setText("Новое");
-            statusChip.setChipBackgroundColorResource(R.color.md_theme_tertiary);
-        } else {
-            statusChip.setVisibility(View.GONE);
-        }
+        descText.setText(description);
 
         infoContainer.addView(cardView);
+    }
+
+    private String formatDataSize(String dataSize) {
+        try {
+            int size = Integer.parseInt(dataSize.trim());
+            return size + " измерений";
+        } catch (NumberFormatException e) {
+            return dataSize;
+        }
+    }
+
+    private String formatWorkTime(String workTime) {
+        try {
+            // Предполагаем, что время в секундах
+            long seconds = Long.parseLong(workTime.trim());
+
+            long hours = seconds / 3600;
+            long minutes = (seconds % 3600) / 60;
+            long secs = seconds % 60;
+
+            if (hours > 24) {
+                long days = hours / 24;
+                hours = hours % 24;
+                return String.format("%d д. %02d:%02d:%02d", days, hours, minutes, secs);
+            } else {
+                return String.format("%02d:%02d:%02d", hours, minutes, secs);
+            }
+        } catch (NumberFormatException e) {
+            return workTime;
+        }
+    }
+
+    private String formatPressure(String pressure) {
+        try {
+            double value = Double.parseDouble(pressure.trim());
+            return String.format("%.2f Па", value);
+        } catch (NumberFormatException e) {
+            return pressure;
+        }
+    }
+
+    private String formatMinMax24(String minmax) {
+        try {
+            // Предполагаем формат: "min max" или "min,max"
+            String[] values = minmax.trim().split("[\\s,]+");
+            if (values.length >= 2) {
+                double min = Double.parseDouble(values[0]);
+                double max = Double.parseDouble(values[1]);
+                return String.format("Мин: %.2f Па\nМакс: %.2f Па", min, max);
+            } else {
+                return minmax;
+            }
+        } catch (Exception e) {
+            return minmax;
+        }
     }
 
     private void showProgress(boolean show) {
@@ -321,6 +256,10 @@ public class MTDeviceInfoFragment extends Fragment {
         } else {
             Toast.makeText(getContext(), "Сначала подключитесь к устройству", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    public void refreshInfo() {
+        connectAndGetInfo();
     }
 
     @Override
