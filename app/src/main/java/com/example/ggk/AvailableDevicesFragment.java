@@ -106,14 +106,36 @@ public class AvailableDevicesFragment extends Fragment implements SwipeRefreshLa
                 bluetoothAdapter.cancelDiscovery();
             }
 
-            // Проверяем, есть ли уже сохраненные данные для этого устройства
-            checkExistingDataAndProceed(device);
+            // Используем новый метод обработки
+            handleDeviceSelection(device);
         });
 
         recyclerView.setAdapter(adapter);
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
 
         return view;
+    }
+
+    private void handleDeviceSelection(DeviceListAdapter.DeviceItem device) {
+        // Проверяем, является ли устройство MT
+        String deviceName = device.getName();
+        if (deviceName != null && deviceName.startsWith("MT")) {
+            // Для MT устройств открываем специальный интерфейс
+            openMTDeviceInterface(device);
+        } else {
+            // Для обычных устройств используем существующую логику
+            checkExistingDataAndProceed(device);
+        }
+    }
+
+    private void openMTDeviceInterface(DeviceListAdapter.DeviceItem device) {
+        MainActivity mainActivity = (MainActivity) getActivity();
+        if (mainActivity != null) {
+            mainActivity.openMTDeviceDetails(
+                    device.getAddress(),
+                    device.getDisplayName()
+            );
+        }
     }
 
     @Override

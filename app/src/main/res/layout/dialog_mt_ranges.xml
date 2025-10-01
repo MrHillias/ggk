@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/current_range_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Текущий диапазон: 0"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/ranges_list_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Доступные диапазоны"
+        android:textSize="14sp"
+        android:layout_marginBottom="16dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/change_range_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Сменить диапазон"
+        android:enabled="false" />
+
+</LinearLayout>

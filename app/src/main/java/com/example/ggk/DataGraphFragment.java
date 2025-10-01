@@ -76,11 +76,17 @@ public class DataGraphFragment extends Fragment {
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Удаляем setHasOptionsMenu(true) так как используем кнопки
 
-        DeviceActivity activity = (DeviceActivity) getActivity();
-        if (activity != null) {
+        // Проверяем тип родительской активности
+        if (getActivity() instanceof DeviceActivity) {
+            DeviceActivity activity = (DeviceActivity) getActivity();
             deviceName = activity.getDeviceName();
+            deviceFolderName = activity.getDeviceFolderName();
+        } else if (getActivity() instanceof MTDeviceActivity) {
+            MTDeviceActivity activity = (MTDeviceActivity) getActivity();
+            deviceName = activity.getDeviceName();
+            // Для MT устройств используем имя как папку
+            deviceFolderName = sanitizeFileName(deviceName);
         }
     }
 
@@ -89,11 +95,15 @@ public class DataGraphFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_data_graph, container, false);
-
-        DeviceActivity activity = (DeviceActivity) getActivity();
-        if (activity != null) {
+        // Проверяем тип родительской активности
+        if (getActivity() instanceof DeviceActivity) {
+            DeviceActivity activity = (DeviceActivity) getActivity();
             deviceName = activity.getDeviceName();
             deviceFolderName = activity.getDeviceFolderName();
+        } else if (getActivity() instanceof MTDeviceActivity) {
+            MTDeviceActivity activity = (MTDeviceActivity) getActivity();
+            deviceName = activity.getDeviceName();
+            deviceFolderName = sanitizeFileName(deviceName);
         }
 
         lineChart = view.findViewById(R.id.line_chart);

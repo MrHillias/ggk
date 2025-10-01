@@ -177,4 +177,24 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra("LAST_SYNC_TIME", lastSyncTime);
         startActivity(intent);
     }
+
+    // Метод для открытия активности MT устройства
+    public void openMTDeviceDetails(String deviceAddress, String deviceName) {
+        Intent intent = new Intent(this, MTDeviceActivity.class);
+        intent.putExtra("DEVICE_ADDRESS", deviceAddress);
+        intent.putExtra("DEVICE_NAME", deviceName);
+        startActivity(intent);
+    }
+
+    // Дополнительный метод для проверки типа устройства при открытии из истории
+    public void openDeviceDetailsWithTypeCheck(String deviceAddress, String deviceName, String deviceFolderName, boolean isFromHistory) {
+        // Проверяем тип устройства по имени
+        if (deviceName != null && deviceName.startsWith("MT")) {
+            // Для MT устройств используем специальный интерфейс
+            openMTDeviceDetails(deviceAddress, deviceName);
+        } else {
+            // Для обычных устройств используем стандартный интерфейс
+            openDeviceDetailsWithFolder(deviceAddress, deviceName, deviceFolderName, isFromHistory);
+        }
+    }
 }
