@@ -666,19 +666,45 @@ public class BluetoothService {
                     if (currentWriteCharacteristicUuid != null) {
                         writeCharacteristic = null;
 
+                        // ВАЖНО: Сначала ищем ТОЧНО указанную характеристику
+                        Log.d(TAG, "Looking for SPECIFIC write characteristic: " + currentWriteCharacteristicUuid);
+
                         for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
                             UUID uuid = characteristic.getUuid();
                             int properties = characteristic.getProperties();
 
-                            Log.d(TAG, "Characteristic: " + uuid +
-                                    " Write: " + ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) +
-                                    " WriteNoResp: " + ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0));
+                            Log.d(TAG, "Found characteristic: " + uuid);
+                            Log.d(TAG, "  Properties: Write=" + ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) +
+                                    ", WriteNoResp=" + ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) +
+                                    ", Read=" + ((properties & BluetoothGattCharacteristic.PROPERTY_READ) != 0) +
+                                    ", Notify=" + ((properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0));
 
-                            if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
-                                    (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
-                                writeCharacteristic = characteristic;
-                                Log.d(TAG, "Found write characteristic: " + uuid);
-                                break;
+                            // Проверяем, является ли это нужной характеристикой
+                            if (uuid.equals(currentWriteCharacteristicUuid)) {
+                                if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
+                                        (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
+                                    writeCharacteristic = characteristic;
+                                    Log.d(TAG, "✓ Found SPECIFIED write characteristic: " + uuid);
+                                    break;
+                                } else {
+                                    Log.w(TAG, "✗ Specified characteristic " + uuid + " does NOT support write!");
+                                }
+                            }
+                        }
+
+                        // Если не нашли указанную, ищем любую подходящую
+                        if (writeCharacteristic == null) {
+                            Log.w(TAG, "Specified write characteristic not found, searching for ANY writable characteristic...");
+                            for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
+                                UUID uuid = characteristic.getUuid();
+                                int properties = characteristic.getProperties();
+
+                                if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
+                                        (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
+                                    writeCharacteristic = characteristic;
+                                    Log.d(TAG, "✓ Found ALTERNATIVE write characteristic: " + uuid);
+                                    break;
+                                }
                             }
                         }
 
@@ -686,7 +712,7 @@ public class BluetoothService {
                             servicesDiscovered.set(true);
                             notifyServicesDiscovered(true);
                         } else {
-                            Log.e(TAG, "No write characteristic found");
+                            Log.e(TAG, "✗ NO write characteristic found AT ALL!");
                             handleConnectionFailure("No write characteristic found");
                         }
                     } else {
@@ -741,27 +767,31 @@ public class BluetoothService {
     public boolean sendCommand(String command) {
         if (bluetoothGatt == null || writeCharacteristic == null || !isConnected.get()) {
             Log.e(TAG, "Cannot send command: not connected or characteristic not available");
+            Log.e(TAG, "  bluetoothGatt: " + (bluetoothGatt != null));
+            Log.e(TAG, "  writeCharacteristic: " + (writeCharacteristic != null));
+            Log.e(TAG, "  isConnected: " + isConnected.get());
             return false;
         }
 
         try {
             byte[] commandBytes = command.getBytes("UTF-8");
 
-            Log.d(TAG, "Sending command: " + command);
+            Log.d(TAG, "Sending command: [" + command.replace("\r", "\\r").replace("\n", "\\n") + "]");
             Log.d(TAG, "Command bytes: " + java.util.Arrays.toString(commandBytes));
+            Log.d(TAG, "Using characteristic: " + writeCharacteristic.getUuid());
 
             writeCharacteristic.setValue(commandBytes);
             boolean result = bluetoothGatt.writeCharacteristic(writeCharacteristic);
 
             if (result) {
-                Log.d(TAG, "Command sent successfully: " + command);
+                Log.d(TAG, "✓ Command sent successfully");
             } else {
-                Log.e(TAG, "Failed to send command: " + command);
+                Log.e(TAG, "✗ Failed to send command");
             }
 
             return result;
         } catch (Exception e) {
-            Log.e(TAG, "Error sending command", e);
+            Log.e(TAG, "✗ Error sending command", e);
             return false;
         }
     }
