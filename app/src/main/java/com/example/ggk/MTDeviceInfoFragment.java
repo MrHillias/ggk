@@ -84,6 +84,12 @@ public class MTDeviceInfoFragment extends Fragment {
         dataButton.setEnabled(false);
         saveButton.setEnabled(false);
 
+        // ВАЖНО: Сбрасываем выбранные индексы при новом подключении
+        selectedUnitsIndex = -1;
+        selectedRangeIndex = -1;
+        currentUnitsIndex = -1;
+        currentRangeIndex = -1;
+
         mtDeviceHandler = new MTDeviceHandler(requireContext(), new MTDeviceHandler.MTDeviceCallback() {
             @Override
             public void onConnectionStateChanged(boolean connected) {
@@ -106,8 +112,16 @@ public class MTDeviceInfoFragment extends Fragment {
                     statusText.setText("Информация получена");
                     displayDeviceInfo(deviceInfo);
                     dataButton.setEnabled(true);
+
+                    // Отключаемся после получения информации для экономии батареи
+                    new android.os.Handler().postDelayed(() -> {
+                        if (mtDeviceHandler != null) {
+                            mtDeviceHandler.disconnect();
+                        }
+                    }, 500);
                 });
             }
+
 
             @Override
             public void onCommandResponse(String command, String response) {
@@ -199,53 +213,38 @@ public class MTDeviceInfoFragment extends Fragment {
         Log.d(TAG, "unitsAll: " + unitsAll);
         Log.d(TAG, "currentUnits: " + currentUnits);
 
-        // Парсим "UnitsAll KPa MPa" → ["KPa", "MPa"]
+        // Парсим единицы, убирая "UnitsAll"
+        java.util.List<String> unitsList = new java.util.ArrayList<>();
         String[] parts = unitsAll.trim().split("\\s+");
-        Log.d(TAG, "Split parts: " + java.util.Arrays.toString(parts));
 
-        if (parts.length > 1) {
-            availableUnits = new String[parts.length - 1];
-            System.arraycopy(parts, 1, availableUnits, 0, parts.length - 1);
-            Log.d(TAG, "Available units: " + java.util.Arrays.toString(availableUnits));
-        } else {
-            availableUnits = new String[0];
+        for (String part : parts) {
+            part = part.trim();
+            if (!part.isEmpty() && !part.equals("UnitsAll")) {
+                unitsList.add(part);
+            }
         }
 
-        // Парсим "Units 0" → индекс 0
-        // Устройство возвращает ИНДЕКС, а не название!
+        availableUnits = unitsList.toArray(new String[0]);
+        Log.d(TAG, "Available units: " + java.util.Arrays.toString(availableUnits));
+
+        // Парсим текущий индекс
         if (currentUnits != null && !currentUnits.equals("TIMEOUT")) {
             String[] currentParts = currentUnits.trim().split("\\s+");
-            Log.d(TAG, "Current parts: " + java.util.Arrays.toString(currentParts));
-
-            if (currentParts.length > 1) {
+            for (String part : currentParts) {
                 try {
-                    // Пытаемся распарсить как индекс
-                    int index = Integer.parseInt(currentParts[1]);
-                    Log.d(TAG, "Parsed index: " + index);
-
+                    int index = Integer.parseInt(part.trim());
                     if (index >= 0 && index < availableUnits.length) {
                         currentUnitsIndex = index;
-                        selectedUnitsIndex = index;
-                        Log.d(TAG, "Set currentUnitsIndex to: " + index + " (" + availableUnits[index] + ")");
+                        selectedUnitsIndex = index; // Инициализируем выбранный индекс
+                        Log.d(TAG, "✓ Set units index to: " + index + " (" + availableUnits[index] + ")");
+                        break;
                     }
                 } catch (NumberFormatException e) {
-                    Log.e(TAG, "Failed to parse as index, trying as name", e);
-                    // Если не число, ищем по названию (старый формат)
-                    String currentUnit = currentParts[1];
-                    for (int i = 0; i < availableUnits.length; i++) {
-                        if (availableUnits[i].equals(currentUnit)) {
-                            currentUnitsIndex = i;
-                            selectedUnitsIndex = i;
-                            Log.d(TAG, "Found by name at index: " + i);
-                            break;
-                        }
-                    }
+                    // Не число, пропускаем
                 }
             }
         }
 
-        Log.d(TAG, "Final currentUnitsIndex: " + currentUnitsIndex);
-        Log.d(TAG, "Final selectedUnitsIndex: " + selectedUnitsIndex);
         addUnitsSelectionCard();
     }
 
@@ -254,39 +253,34 @@ public class MTDeviceInfoFragment extends Fragment {
         Log.d(TAG, "rangesAll: " + rangesAll);
         Log.d(TAG, "currentRanges: " + currentRanges);
 
-        // Парсим "RangesAll 0 1000, 0 1600, 0 2500"
-        // Индекс 0 → "0 1000", индекс 1 → "0 1600", индекс 2 → "0 2500"
-        String rangesData = rangesAll.replaceFirst("RangesAll\\s*", "").trim();
-        Log.d(TAG, "Ranges data after cleanup: " + rangesData);
-
+        // Убираем "RangesAll" из начала
+        String rangesData = rangesAll.replaceFirst("^RangesAll\\s*", "").trim();
         String[] rangePairs = rangesData.split(",");
-        Log.d(TAG, "Split range pairs: " + java.util.Arrays.toString(rangePairs));
 
         availableRanges = new String[rangePairs.length];
-
         for (int i = 0; i < rangePairs.length; i++) {
             availableRanges[i] = rangePairs[i].trim();
         }
         Log.d(TAG, "Available ranges: " + java.util.Arrays.toString(availableRanges));
 
-        // Парсим "Ranges 0" → индекс 0
+        // Парсим текущий индекс
         if (currentRanges != null && !currentRanges.equals("TIMEOUT")) {
             String[] currentParts = currentRanges.trim().split("\\s+");
-            Log.d(TAG, "Current range parts: " + java.util.Arrays.toString(currentParts));
-
-            if (currentParts.length > 1) {
+            for (String part : currentParts) {
                 try {
-                    currentRangeIndex = Integer.parseInt(currentParts[1]);
-                    selectedRangeIndex = currentRangeIndex;
-                    Log.d(TAG, "Set currentRangeIndex to: " + currentRangeIndex + " (" + availableRanges[currentRangeIndex] + ")");
+                    int index = Integer.parseInt(part.trim());
+                    if (index >= 0 && index < availableRanges.length) {
+                        currentRangeIndex = index;
+                        selectedRangeIndex = index; // Инициализируем выбранный индекс
+                        Log.d(TAG, "✓ Set range index to: " + index + " (" + availableRanges[index] + ")");
+                        break;
+                    }
                 } catch (NumberFormatException e) {
-                    Log.e(TAG, "Error parsing range index", e);
+                    // Не число, пропускаем
                 }
             }
         }
 
-        Log.d(TAG, "Final currentRangeIndex: " + currentRangeIndex);
-        Log.d(TAG, "Final selectedRangeIndex: " + selectedRangeIndex);
         addRangesSelectionCard();
     }
 
@@ -300,35 +294,42 @@ public class MTDeviceInfoFragment extends Fragment {
 
         titleText.setText("Единицы измерения");
 
-        if (currentUnitsIndex >= 0 && currentUnitsIndex < availableUnits.length) {
-            currentText.setText("Текущие: " + availableUnits[currentUnitsIndex] + " (индекс " + currentUnitsIndex + ")");
+        if (availableUnits != null && availableUnits.length > 0) {
+            if (currentUnitsIndex >= 0 && currentUnitsIndex < availableUnits.length) {
+                currentText.setText("Текущие: " + availableUnits[currentUnitsIndex]);
+            } else {
+                currentText.setText("Текущие: не определены");
+            }
+
+            // Создаем кнопки
+            for (int i = 0; i < availableUnits.length; i++) {
+                final int index = i;
+                MaterialButton button = new MaterialButton(getContext());
+                button.setText(availableUnits[i]);
+                button.setTextSize(16);
+
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                );
+                params.setMargins(0, 0, 0, 12);
+                button.setLayoutParams(params);
+
+                updateButtonStyle(button, i == selectedUnitsIndex);
+
+                button.setOnClickListener(v -> {
+                    if (selectedUnitsIndex != index) {
+                        selectedUnitsIndex = index;
+                        updateUnitsButtons(optionsContainer);
+                        checkAndEnableSaveButton();
+                        Log.d(TAG, "User selected units: " + availableUnits[index] + " (index " + index + ")");
+                    }
+                });
+
+                optionsContainer.addView(button);
+            }
         } else {
-            currentText.setText("Текущие: не определены");
-        }
-
-        // Создаем кнопки
-        for (int i = 0; i < availableUnits.length; i++) {
-            final int index = i;
-            MaterialButton button = new MaterialButton(getContext());
-            button.setText(availableUnits[i]);
-            button.setTextSize(16);
-
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-            );
-            params.setMargins(0, 0, 0, 12);
-            button.setLayoutParams(params);
-
-            updateButtonStyle(button, i == selectedUnitsIndex);
-
-            button.setOnClickListener(v -> {
-                selectedUnitsIndex = index;
-                updateUnitsButtons(optionsContainer);
-                saveButton.setEnabled(true);
-            });
-
-            optionsContainer.addView(button);
+            currentText.setText("Единицы не загружены");
         }
 
         infoContainer.addView(cardView);
@@ -344,38 +345,52 @@ public class MTDeviceInfoFragment extends Fragment {
 
         titleText.setText("Диапазоны измерений");
 
-        if (currentRangeIndex >= 0 && currentRangeIndex < availableRanges.length) {
-            currentText.setText("Текущий: [" + availableRanges[currentRangeIndex] + "] (индекс " + currentRangeIndex + ")");
+        if (availableRanges != null && availableRanges.length > 0) {
+            if (currentRangeIndex >= 0 && currentRangeIndex < availableRanges.length) {
+                currentText.setText("Текущий: [" + availableRanges[currentRangeIndex] + "]");
+            } else {
+                currentText.setText("Текущий: не определен");
+            }
+
+            // Создаем кнопки
+            for (int i = 0; i < availableRanges.length; i++) {
+                final int index = i;
+                MaterialButton button = new MaterialButton(getContext());
+                button.setText("[" + availableRanges[i] + "]");
+                button.setTextSize(16);
+
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                );
+                params.setMargins(0, 0, 0, 12);
+                button.setLayoutParams(params);
+
+                updateButtonStyle(button, i == selectedRangeIndex);
+
+                button.setOnClickListener(v -> {
+                    if (selectedRangeIndex != index) {
+                        selectedRangeIndex = index;
+                        updateRangesButtons(optionsContainer);
+                        checkAndEnableSaveButton();
+                        Log.d(TAG, "User selected range: " + availableRanges[index] + " (index " + index + ")");
+                    }
+                });
+
+                optionsContainer.addView(button);
+            }
         } else {
-            currentText.setText("Текущий: не определен");
-        }
-
-        // Создаем кнопки
-        for (int i = 0; i < availableRanges.length; i++) {
-            final int index = i;
-            MaterialButton button = new MaterialButton(getContext());
-            button.setText("[" + availableRanges[i] + "]");
-            button.setTextSize(16);
-
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-            );
-            params.setMargins(0, 0, 0, 12);
-            button.setLayoutParams(params);
-
-            updateButtonStyle(button, i == selectedRangeIndex);
-
-            button.setOnClickListener(v -> {
-                selectedRangeIndex = index;
-                updateRangesButtons(optionsContainer);
-                saveButton.setEnabled(true);
-            });
-
-            optionsContainer.addView(button);
+            currentText.setText("Диапазоны не загружены");
         }
 
         infoContainer.addView(cardView);
+    }
+
+    private void checkAndEnableSaveButton() {
+        // Включаем кнопку "Сохранить" только если что-то изменилось
+        boolean hasChanges = (selectedUnitsIndex != currentUnitsIndex) ||
+                (selectedRangeIndex != currentRangeIndex);
+        saveButton.setEnabled(hasChanges);
     }
 
     private void updateButtonStyle(MaterialButton button, boolean isSelected) {
@@ -403,36 +418,61 @@ public class MTDeviceInfoFragment extends Fragment {
     }
 
     private void saveSettings() {
-        if (mtDeviceHandler != null) {
-            boolean hasChanges = false;
-            StringBuilder message = new StringBuilder("Применяю настройки:\n");
+        if (mtDeviceHandler == null) {
+            Toast.makeText(getContext(), "Обработчик не инициализирован", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-            // Проверяем единицы
-            if (selectedUnitsIndex != -1 && selectedUnitsIndex != currentUnitsIndex) {
-                mtDeviceHandler.setUnits(selectedUnitsIndex);
-                message.append("• Единицы: ").append(availableUnits[selectedUnitsIndex]).append("\n");
-                hasChanges = true;
+        boolean hasChanges = false;
+        StringBuilder message = new StringBuilder("Применяю настройки:\n");
+
+        // ВАЖНО: НЕ отключаемся от устройства перед отправкой команд!
+        // Используем уже установленное соединение
+
+        // Проверяем единицы
+        if (selectedUnitsIndex != -1 && selectedUnitsIndex != currentUnitsIndex) {
+            Log.d(TAG, "Setting units to index: " + selectedUnitsIndex);
+            mtDeviceHandler.setUnits(selectedUnitsIndex);
+            message.append("• Единицы: индекс ").append(selectedUnitsIndex);
+            if (availableUnits != null && selectedUnitsIndex < availableUnits.length) {
+                message.append(" (").append(availableUnits[selectedUnitsIndex]).append(")");
             }
+            message.append("\n");
+            hasChanges = true;
+        }
 
-            // Проверяем диапазон
-            if (selectedRangeIndex != -1 && selectedRangeIndex != currentRangeIndex) {
-                mtDeviceHandler.setRange(selectedRangeIndex);
-                message.append("• Диапазон: ").append(availableRanges[selectedRangeIndex]).append("\n");
-                hasChanges = true;
+        // Проверяем диапазон
+        if (selectedRangeIndex != -1 && selectedRangeIndex != currentRangeIndex) {
+            Log.d(TAG, "Setting range to index: " + selectedRangeIndex);
+            mtDeviceHandler.setRange(selectedRangeIndex);
+            message.append("• Диапазон: индекс ").append(selectedRangeIndex);
+            if (availableRanges != null && selectedRangeIndex < availableRanges.length) {
+                message.append(" (").append(availableRanges[selectedRangeIndex]).append(")");
             }
+            message.append("\n");
+            hasChanges = true;
+        }
 
-            if (hasChanges) {
-                statusText.setText(message.toString());
-                Toast.makeText(getContext(), "Настройки отправлены", Toast.LENGTH_SHORT).show();
-                saveButton.setEnabled(false);
+        if (hasChanges) {
+            statusText.setText(message.toString());
+            Toast.makeText(getContext(), "Настройки отправлены", Toast.LENGTH_LONG).show();
+            saveButton.setEnabled(false);
 
-                // Обновляем через 2 секунды
-                new android.os.Handler().postDelayed(() -> connectAndGetInfo(), 2000);
-            } else {
-                Toast.makeText(getContext(), "Нет изменений для применения", Toast.LENGTH_SHORT).show();
-            }
+            // Ждем применения настроек и переподключаемся
+            new android.os.Handler().postDelayed(() -> {
+                Log.d(TAG, "Disconnecting before refresh...");
+                if (mtDeviceHandler != null) {
+                    mtDeviceHandler.disconnect();
+                }
+
+                // Еще небольшая задержка перед переподключением
+                new android.os.Handler().postDelayed(() -> {
+                    Log.d(TAG, "Refreshing device info after settings change...");
+                    connectAndGetInfo();
+                }, 1000);
+            }, 2000); // 2 секунды на применение
         } else {
-            Toast.makeText(getContext(), "Сначала подключитесь к устройству", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "Нет изменений", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -506,7 +546,6 @@ public class MTDeviceInfoFragment extends Fragment {
     private void showProgress(boolean show) {
         progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
         progressText.setVisibility(show ? View.VISIBLE : View.GONE);
-        saveButton.setEnabled(!show);
     }
 
     private void requestData() {

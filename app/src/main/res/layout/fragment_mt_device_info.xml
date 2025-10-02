@@ -74,7 +74,7 @@
                         android:enabled="false"
                         android:text="Получить\nданные"
                         android:textSize="14sp"
-                        style="@style/Widget.Material3.Button.TonalButton" />
+                        style="@style/Widget.MaterialComponents.Button" />
 
                 </LinearLayout>
 

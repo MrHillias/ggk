@@ -140,7 +140,10 @@ public class MTDeviceHandler {
                     readReady = true;
                     checkBothReady();
                 } else {
-                    notifyError("Не удалось настроить чтение");
+                    // Не показываем ошибку при нормальном отключении
+                    if (isProcessing) {
+                        notifyError("Не удалось настроить чтение");
+                    }
                 }
             }
 
@@ -266,22 +269,50 @@ public class MTDeviceHandler {
         responseBuffer.append(data);
         String bufferContent = responseBuffer.toString();
 
-        boolean hasTerminator = bufferContent.contains("\r") || bufferContent.contains("\n");
-        boolean hasEnoughData = bufferContent.length() > 3;
+        // Ищем имя команды без "?"
+        String commandBase = currentCommand.replace("?", "");
 
-        if (hasTerminator || hasEnoughData) {
-            cancelCommandTimeout();
+        // КРИТИЧНО: Ищем ПОСЛЕДНЕЕ вхождение команды в буфере
+        int lastCommandIndex = bufferContent.lastIndexOf(commandBase);
 
-            String fullResponse = bufferContent.replace("\r", "\n").trim();
-            String response = extractLastResponse(fullResponse, currentCommand);
-
-            Log.d(TAG, "=== RESPONSE COMPLETE ===");
-            Log.d(TAG, "Command: " + currentCommand);
-            Log.d(TAG, "Extracted response: [" + response + "]");
-
-            saveResponse(currentCommand, response);
-            moveToNextCommand();
+        if (lastCommandIndex == -1) {
+            Log.d(TAG, "Command base not found yet in buffer");
+            return; // Команда еще не пришла
         }
+
+        // Проверяем, есть ли перенос строки после команды
+        int nextLineIndex = bufferContent.indexOf("\r", lastCommandIndex);
+        if (nextLineIndex == -1) {
+            nextLineIndex = bufferContent.indexOf("\n", lastCommandIndex);
+        }
+
+        if (nextLineIndex == -1) {
+            Log.d(TAG, "No line terminator after command yet");
+            return; // Ответ еще не полный
+        }
+
+        // Нашли полный ответ
+        cancelCommandTimeout();
+
+        // Извлекаем строку с ответом: "CommandName value\r"
+        String responseLine = bufferContent.substring(lastCommandIndex, nextLineIndex).trim();
+
+        Log.d(TAG, "=== RESPONSE COMPLETE ===");
+        Log.d(TAG, "Command: " + currentCommand);
+        Log.d(TAG, "Full response line: [" + responseLine + "]");
+
+        // Убираем имя команды, оставляем только значение
+        String response;
+        if (responseLine.startsWith(commandBase)) {
+            response = responseLine.substring(commandBase.length()).trim();
+        } else {
+            response = responseLine;
+        }
+
+        Log.d(TAG, "Extracted response: [" + response + "]");
+
+        saveResponse(currentCommand, response);
+        moveToNextCommand();
     }
 
     private String extractLastResponse(String fullResponse, String command) {
@@ -332,7 +363,6 @@ public class MTDeviceHandler {
         Log.d(TAG, "=== DISCONNECTED ===");
         isProcessing = false;
         cancelCommandTimeout();
-        notifyConnectionState(false);
     }
 
     public void requestData() {
@@ -345,21 +375,41 @@ public class MTDeviceHandler {
     }
 
     public void setRange(int rangeIndex) {
+        Log.d(TAG, "=== setRange CALLED ===");
+        Log.d(TAG, "Range index: " + rangeIndex);
+        Log.d(TAG, "writeService != null: " + (writeService != null));
+
+        if (writeService != null) {
+            Log.d(TAG, "writeService.isConnected(): " + writeService.isConnected());
+        }
+
         if (writeService != null && writeService.isConnected()) {
             String command = "Ranges " + rangeIndex + COMMAND_TERMINATOR;
-            Log.d(TAG, "Sending range command: " + command);
-            writeService.sendCommand(command);
+            Log.d(TAG, "Sending range command: [" + command.replace("\r", "\\r") + "]");
+            boolean sent = writeService.sendCommand(command);
+            Log.d(TAG, "Command send result: " + sent);
         } else {
+            Log.e(TAG, "Cannot send range command - not connected!");
             notifyError("Устройство не подключено");
         }
     }
 
     public void setUnits(int unitsIndex) {
+        Log.d(TAG, "=== setUnits CALLED ===");
+        Log.d(TAG, "Units index: " + unitsIndex);
+        Log.d(TAG, "writeService != null: " + (writeService != null));
+
+        if (writeService != null) {
+            Log.d(TAG, "writeService.isConnected(): " + writeService.isConnected());
+        }
+
         if (writeService != null && writeService.isConnected()) {
             String command = "Units " + unitsIndex + COMMAND_TERMINATOR;
-            Log.d(TAG, "Sending units command: " + command);
-            writeService.sendCommand(command);
+            Log.d(TAG, "Sending units command: [" + command.replace("\r", "\\r") + "]");
+            boolean sent = writeService.sendCommand(command);
+            Log.d(TAG, "Command send result: " + sent);
         } else {
+            Log.e(TAG, "Cannot send units command - not connected!");
             notifyError("Устройство не подключено");
         }
     }
