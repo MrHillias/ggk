@@ -82,35 +82,6 @@ public class MTDeviceDataHelper {
     }
 
     /**
-     * Сохраняет данные MT устройства в формате, совместимом с обычными устройствами
-     */
-    public static void saveMTData(Context context, String deviceName,
-                                  double[] values, long startTime) {
-        try {
-            File deviceFolder = new File(context.getFilesDir(), sanitizeFileName(deviceName));
-            if (!deviceFolder.exists()) {
-                deviceFolder.mkdirs();
-            }
-
-            // Сохраняем в стандартный файл data.txt для совместимости с графиком
-            File dataFile = new File(deviceFolder, "data.txt");
-            SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
-
-            try (FileWriter writer = new FileWriter(dataFile, true)) { // Append mode
-                for (int i = 0; i < values.length; i++) {
-                    long timestamp = startTime + (i * 1000L); // 1 секунда между измерениями
-                    writer.write(String.format(Locale.US, "%.2f;%s\n",
-                            values[i], sdf.format(new Date(timestamp))));
-                }
-            }
-
-            Log.d(TAG, "Saved " + values.length + " MT data points for " + deviceName);
-        } catch (IOException e) {
-            Log.e(TAG, "Error saving MT data", e);
-        }
-    }
-
-    /**
      * Конвертирует данные MT устройства в массив double
      */
     public static double[] parseNumericData(String data) {
@@ -135,5 +106,43 @@ public class MTDeviceDataHelper {
 
     private static String sanitizeFileName(String name) {
         return name.replaceAll("[^a-zA-Z0-9.-]", "_");
+    }
+
+    /**
+     * Сохраняет данные MT устройства в формате, совместимом с обычными устройствами
+     * БЕЗ создания info.txt
+     */
+    public static void saveMTData(Context context, String deviceName,
+                                  double[] values, long startTime) throws IOException {
+        try {
+            File deviceFolder = new File(context.getFilesDir(), sanitizeFileName(deviceName));
+            if (!deviceFolder.exists()) {
+                deviceFolder.mkdirs();
+            }
+
+            // Создаем маркер MT устройства
+            File mtMarkerFile = new File(deviceFolder, "mt_device");
+            if (!mtMarkerFile.exists()) {
+                mtMarkerFile.createNewFile();
+            }
+
+            // Сохраняем в стандартный файл data.txt для совместимости с графиком
+            File dataFile = new File(deviceFolder, "data.txt");
+            SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+
+            try (FileWriter writer = new FileWriter(dataFile, true)) { // Append mode
+                // Данные идут в обратном порядке (от новых к старым)
+                for (int i = values.length - 1; i >= 0; i--) {
+                    long timestamp = startTime - (i * 1000L); // Вычитаем секунды
+                    writer.write(String.format(Locale.US, "%.2f;%s\n",
+                            values[i], sdf.format(new Date(timestamp))));
+                }
+            }
+
+            Log.d(TAG, "Saved " + values.length + " MT data points for " + deviceName);
+        } catch (IOException e) {
+            Log.e(TAG, "Error saving MT data", e);
+            throw e; // Пробрасываем исключение для обработки в UI
+        }
     }
 }

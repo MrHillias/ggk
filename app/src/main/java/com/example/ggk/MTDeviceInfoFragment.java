@@ -423,57 +423,183 @@ public class MTDeviceInfoFragment extends Fragment {
             return;
         }
 
+        // Проверяем, есть ли изменения
         boolean hasChanges = false;
         StringBuilder message = new StringBuilder("Применяю настройки:\n");
 
-        // ВАЖНО: НЕ отключаемся от устройства перед отправкой команд!
-        // Используем уже установленное соединение
+        int unitsToApply = -1;
+        int rangeToApply = -1;
 
-        // Проверяем единицы
         if (selectedUnitsIndex != -1 && selectedUnitsIndex != currentUnitsIndex) {
-            Log.d(TAG, "Setting units to index: " + selectedUnitsIndex);
-            mtDeviceHandler.setUnits(selectedUnitsIndex);
+            unitsToApply = selectedUnitsIndex;
+            hasChanges = true;
             message.append("• Единицы: индекс ").append(selectedUnitsIndex);
             if (availableUnits != null && selectedUnitsIndex < availableUnits.length) {
                 message.append(" (").append(availableUnits[selectedUnitsIndex]).append(")");
             }
             message.append("\n");
-            hasChanges = true;
         }
 
-        // Проверяем диапазон
         if (selectedRangeIndex != -1 && selectedRangeIndex != currentRangeIndex) {
-            Log.d(TAG, "Setting range to index: " + selectedRangeIndex);
-            mtDeviceHandler.setRange(selectedRangeIndex);
+            rangeToApply = selectedRangeIndex;
+            hasChanges = true;
             message.append("• Диапазон: индекс ").append(selectedRangeIndex);
             if (availableRanges != null && selectedRangeIndex < availableRanges.length) {
                 message.append(" (").append(availableRanges[selectedRangeIndex]).append(")");
             }
             message.append("\n");
-            hasChanges = true;
         }
 
-        if (hasChanges) {
-            statusText.setText(message.toString());
-            Toast.makeText(getContext(), "Настройки отправлены", Toast.LENGTH_LONG).show();
-            saveButton.setEnabled(false);
-
-            // Ждем применения настроек и переподключаемся
-            new android.os.Handler().postDelayed(() -> {
-                Log.d(TAG, "Disconnecting before refresh...");
-                if (mtDeviceHandler != null) {
-                    mtDeviceHandler.disconnect();
-                }
-
-                // Еще небольшая задержка перед переподключением
-                new android.os.Handler().postDelayed(() -> {
-                    Log.d(TAG, "Refreshing device info after settings change...");
-                    connectAndGetInfo();
-                }, 1000);
-            }, 2000); // 2 секунды на применение
-        } else {
+        if (!hasChanges) {
             Toast.makeText(getContext(), "Нет изменений", Toast.LENGTH_SHORT).show();
+            return;
         }
+
+        // Показываем прогресс
+        statusText.setText("Шаг 1/4: Подключение...");
+        showProgress(true);
+        saveButton.setEnabled(false);
+        dataButton.setEnabled(false);
+
+        // Запускаем процесс отправки настроек
+        startSettingsUpdateProcess(unitsToApply, rangeToApply);
+    }
+
+    private void startSettingsUpdateProcess(final int unitsIndex, final int rangeIndex) {
+        Log.d(TAG, "=== STARTING SETTINGS UPDATE PROCESS ===");
+        Log.d(TAG, "Units: " + unitsIndex + ", Range: " + rangeIndex);
+
+        // ШАГ 1: Отключаемся (если подключены)
+        if (mtDeviceHandler != null) {
+            mtDeviceHandler.disconnect();
+        }
+
+        // ШАГ 2: Подключаемся заново
+        new android.os.Handler().postDelayed(() -> {
+            Log.d(TAG, "Step 1: Connecting to device...");
+            statusText.setText("Шаг 1/4: Подключение...");
+
+            connectForCommandsOnly(unitsIndex, rangeIndex);
+        }, 500);
+    }
+
+    private void connectForCommandsOnly(final int unitsIndex, final int rangeIndex) {
+        mtDeviceHandler = new MTDeviceHandler(requireContext(), new MTDeviceHandler.MTDeviceCallback() {
+            @Override
+            public void onConnectionStateChanged(boolean connected) {
+                if (getActivity() == null) return;
+                getActivity().runOnUiThread(() -> {
+                    if (connected) {
+                        Log.d(TAG, "Step 1 complete: Connected");
+                        statusText.setText("Шаг 2/4: Отправка команд...");
+
+                        // ШАГ 3: Ждем секунду и отправляем команды
+                        new android.os.Handler().postDelayed(() -> {
+                            sendCommands(unitsIndex, rangeIndex);
+                        }, 1000);
+                    }
+                });
+            }
+
+            @Override
+            public void onDeviceInfoReady(Map<String, String> deviceInfo) {
+                // Не используется в этом режиме
+            }
+
+            @Override
+            public void onCommandResponse(String command, String response) {
+                // Не используется
+            }
+
+            @Override
+            public void onError(String error) {
+                if (getActivity() == null) return;
+                getActivity().runOnUiThread(() -> {
+                    Log.e(TAG, "Error during settings update: " + error);
+                    showProgress(false);
+                    statusText.setText("Ошибка: " + error);
+                    Toast.makeText(getContext(), "Ошибка: " + error, Toast.LENGTH_LONG).show();
+                    saveButton.setEnabled(true);
+                });
+            }
+
+            @Override
+            public void onProgress(int current, int total) {
+                // Не используется
+            }
+        });
+
+        mtDeviceHandler.connect(deviceAddress);
+    }
+
+    private void sendCommands(int unitsIndex, int rangeIndex) {
+        Log.d(TAG, "Step 2: Sending commands...");
+
+        // КРИТИЧНО: Сначала останавливаем опрос
+        if (mtDeviceHandler != null) {
+            mtDeviceHandler.stopPolling();
+        }
+
+        // Ждем немного, чтобы текущая команда завершилась
+        new android.os.Handler().postDelayed(() -> {
+
+            // Отправляем команды с задержками
+            if (unitsIndex != -1) {
+                Log.d(TAG, "Sending units command: " + unitsIndex);
+                mtDeviceHandler.setUnits(unitsIndex);
+
+                // Задержка перед следующей командой
+                new android.os.Handler().postDelayed(() -> {
+                    if (rangeIndex != -1) {
+                        Log.d(TAG, "Sending range command: " + rangeIndex);
+                        mtDeviceHandler.setRange(rangeIndex);
+                    }
+
+                    statusText.setText("Шаг 2/4: Команды отправлены");
+
+                    // Ждем на применение команд
+                    disconnectAndReconnect();
+                }, 500); // 500ms между командами
+
+            } else if (rangeIndex != -1) {
+                Log.d(TAG, "Sending range command: " + rangeIndex);
+                mtDeviceHandler.setRange(rangeIndex);
+
+                statusText.setText("Шаг 2/4: Команды отправлены");
+
+                // Ждем на применение команд
+                disconnectAndReconnect();
+            }
+
+        }, 500); // 500ms на остановку текущей команды
+    }
+
+    private void disconnectAndReconnect() {
+        // ШАГ 4: Ждем 2 секунды на применение, затем отключаемся
+        new android.os.Handler().postDelayed(() -> {
+            Log.d(TAG, "Step 3: Disconnecting...");
+            statusText.setText("Шаг 3/4: Отключение...");
+
+            if (mtDeviceHandler != null) {
+                mtDeviceHandler.disconnect();
+            }
+
+            // ШАГ 5: Ждем секунду и переподключаемся для скачивания данных
+            new android.os.Handler().postDelayed(() -> {
+                Log.d(TAG, "Step 4: Reconnecting to download updated info...");
+                statusText.setText("Шаг 4/4: Получение обновленных данных...");
+
+                // Сбрасываем индексы, чтобы они обновились
+                selectedUnitsIndex = -1;
+                selectedRangeIndex = -1;
+                currentUnitsIndex = -1;
+                currentRangeIndex = -1;
+
+                // Подключаемся и скачиваем все данные заново
+                connectAndGetInfo();
+            }, 1000);
+
+        }, 2000); // 2 секунды на применение команд
     }
 
     private void addInfoCard(String title, String value, String description) {
@@ -549,12 +675,28 @@ public class MTDeviceInfoFragment extends Fragment {
     }
 
     private void requestData() {
+        // Отключаемся от текущего соединения
         if (mtDeviceHandler != null) {
-            statusText.setText("Запрос данных...");
-            mtDeviceHandler.requestData();
-        } else {
-            Toast.makeText(getContext(), "Сначала подключитесь к устройству", Toast.LENGTH_SHORT).show();
+            mtDeviceHandler.disconnect();
+            mtDeviceHandler.cleanup();
         }
+
+        // Устанавливаем флаг автозапуска
+        MTDeviceActivity activity = (MTDeviceActivity) getActivity();
+        if (activity != null) {
+            activity.requestAutoDataDownload();
+
+            // Переключаемся на вкладку "Данные"
+            activity.runOnUiThread(() -> {
+                androidx.viewpager2.widget.ViewPager2 viewPager = activity.findViewById(R.id.view_pager);
+                if (viewPager != null) {
+                    viewPager.setCurrentItem(1, true); // Вкладка 1 = Данные
+                }
+            });
+        }
+
+        statusText.setText("Переключение на вкладку данных...");
+        showProgress(false);
     }
 
     public void refreshInfo() {

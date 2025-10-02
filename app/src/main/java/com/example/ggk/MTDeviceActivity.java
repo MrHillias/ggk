@@ -153,4 +153,18 @@ public class MTDeviceActivity extends AppCompatActivity {
             return settingsFragment;
         }
     }
+
+    private boolean shouldAutoStartDataDownload = false;
+
+    public boolean shouldAutoStartDataDownload() {
+        return shouldAutoStartDataDownload;
+    }
+
+    public void clearAutoStartFlag() {
+        shouldAutoStartDataDownload = false;
+    }
+
+    public void requestAutoDataDownload() {
+        shouldAutoStartDataDownload = true;
+    }
 }

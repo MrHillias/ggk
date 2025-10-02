@@ -171,41 +171,16 @@ public class MTDeviceHandler {
         });
     }
 
-    private void checkBothReady() {
-        if (writeReady && readReady && !isProcessing) {
-            Log.d(TAG, "=== BOTH SERVICES READY ===");
-            notifyConnectionState(true);
-
-            Log.d(TAG, "Waiting " + INITIAL_DELAY + "ms before starting commands...");
-            mainHandler.postDelayed(this::startCommandSequence, INITIAL_DELAY);
-        }
-    }
-
-    public void connect(String deviceAddress) {
-        this.deviceAddress = deviceAddress;
-        this.writeReady = false;
-        this.readReady = false;
-        this.isProcessing = false;
-        this.deviceInfo.clear();
-
-        Log.d(TAG, "=== MT DEVICE CONNECTION START ===");
-        Log.d(TAG, "Device address: " + deviceAddress);
-
-        writeService.connectForCommands(deviceAddress, SERVICE_UUID, CHAR_UUID_FFF2);
-        readService.connect(deviceAddress, SERVICE_UUID, CHAR_UUID_FFF1);
-    }
-
-    private void startCommandSequence() {
-        isProcessing = true;
-        commandIndex = 0;
-        deviceInfo.clear();
-
-        Log.d(TAG, "=== STARTING COMMAND SEQUENCE ===");
-        Log.d(TAG, "Total commands: " + BASIC_COMMANDS.length);
-        sendNextCommand();
-    }
+    private volatile boolean shouldStopPolling = false;
 
     private void sendNextCommand() {
+        // КРИТИЧНО: Проверяем, нужно ли остановить опрос
+        if (shouldStopPolling) {
+            Log.d(TAG, "Polling stopped by request");
+            isProcessing = false;
+            return;
+        }
+
         if (commandIndex >= BASIC_COMMANDS.length) {
             finishCommandSequence();
             return;
@@ -236,6 +211,40 @@ public class MTDeviceHandler {
             saveResponse(currentCommand, "ERROR");
             moveToNextCommand();
         }
+    }
+
+    // Новый метод для остановки опроса
+    public void stopPolling() {
+        Log.d(TAG, "Stopping polling sequence");
+        shouldStopPolling = true;
+        isProcessing = false;
+        cancelCommandTimeout();
+    }
+
+    public void connect(String deviceAddress) {
+        this.deviceAddress = deviceAddress;
+        this.writeReady = false;
+        this.readReady = false;
+        this.isProcessing = false;
+        this.deviceInfo.clear();
+
+        shouldStopPolling = false;
+
+        Log.d(TAG, "=== MT DEVICE CONNECTION START ===");
+        Log.d(TAG, "Device address: " + deviceAddress);
+
+        writeService.connectForCommands(deviceAddress, SERVICE_UUID, CHAR_UUID_FFF2);
+        readService.connect(deviceAddress, SERVICE_UUID, CHAR_UUID_FFF1);
+    }
+
+    private void startCommandSequence() {
+        isProcessing = true;
+        commandIndex = 0;
+        deviceInfo.clear();
+
+        Log.d(TAG, "=== STARTING COMMAND SEQUENCE ===");
+        Log.d(TAG, "Total commands: " + BASIC_COMMANDS.length);
+        sendNextCommand();
     }
 
     private void startCommandTimeout() {
@@ -374,7 +383,7 @@ public class MTDeviceHandler {
         }
     }
 
-    public void setRange(int rangeIndex) {
+    public boolean setRange(int rangeIndex) {
         Log.d(TAG, "=== setRange CALLED ===");
         Log.d(TAG, "Range index: " + rangeIndex);
         Log.d(TAG, "writeService != null: " + (writeService != null));
@@ -388,13 +397,15 @@ public class MTDeviceHandler {
             Log.d(TAG, "Sending range command: [" + command.replace("\r", "\\r") + "]");
             boolean sent = writeService.sendCommand(command);
             Log.d(TAG, "Command send result: " + sent);
+            return sent;
         } else {
             Log.e(TAG, "Cannot send range command - not connected!");
             notifyError("Устройство не подключено");
+            return false;
         }
     }
 
-    public void setUnits(int unitsIndex) {
+    public boolean setUnits(int unitsIndex) {
         Log.d(TAG, "=== setUnits CALLED ===");
         Log.d(TAG, "Units index: " + unitsIndex);
         Log.d(TAG, "writeService != null: " + (writeService != null));
@@ -408,9 +419,56 @@ public class MTDeviceHandler {
             Log.d(TAG, "Sending units command: [" + command.replace("\r", "\\r") + "]");
             boolean sent = writeService.sendCommand(command);
             Log.d(TAG, "Command send result: " + sent);
+            return sent;
         } else {
             Log.e(TAG, "Cannot send units command - not connected!");
             notifyError("Устройство не подключено");
+            return false;
+        }
+    }
+
+    private int pendingUnitsCommand = -1;
+    private int pendingRangeCommand = -1;
+
+    public void setPendingCommands(int units, int range) {
+        this.pendingUnitsCommand = units;
+        this.pendingRangeCommand = range;
+        Log.d(TAG, "Set pending commands - units: " + units + ", range: " + range);
+    }
+
+    public boolean isConnected() {
+        return writeService != null && writeService.isConnected() &&
+                readService != null && readService.isConnected();
+    }
+
+    private void checkBothReady() {
+        if (writeReady && readReady && !isProcessing) {
+            Log.d(TAG, "=== BOTH SERVICES READY ===");
+            notifyConnectionState(true);
+
+            // Проверяем, есть ли отложенные команды
+            if (pendingUnitsCommand != -1 || pendingRangeCommand != -1) {
+                Log.d(TAG, "Found pending commands, sending now...");
+
+                // Ждем немного, чтобы соединение стабилизировалось
+                mainHandler.postDelayed(() -> {
+                    if (pendingUnitsCommand != -1) {
+                        Log.d(TAG, "Sending pending units: " + pendingUnitsCommand);
+                        setUnits(pendingUnitsCommand);
+                        pendingUnitsCommand = -1;
+                    }
+
+                    if (pendingRangeCommand != -1) {
+                        Log.d(TAG, "Sending pending range: " + pendingRangeCommand);
+                        setRange(pendingRangeCommand);
+                        pendingRangeCommand = -1;
+                    }
+                }, 500); // Небольшая задержка для стабилизации
+            } else {
+                // Обычный режим - запускаем опрос
+                Log.d(TAG, "Waiting " + INITIAL_DELAY + "ms before starting commands...");
+                mainHandler.postDelayed(this::startCommandSequence, INITIAL_DELAY);
+            }
         }
     }
 

@@ -153,46 +153,171 @@ public class MTDataFragment extends Fragment {
         });
     }
 
-    private void startDataTransfer() {
-        if (bluetoothService == null || !bluetoothService.isConnected()) {
-            // Подключаемся к устройству
-            statusTextView.setText("Подключение...");
-            progressIndicator.setVisibility(View.VISIBLE);
-            bluetoothService.connectForCommands(deviceAddress, SERVICE_UUID, WRITE_UUID);
 
-            // Ждем подключения и отправляем команду
-            mainHandler.postDelayed(() -> {
-                if (bluetoothService.isConnected()) {
-                    sendDataCommand();
+    private final BluetoothService.BluetoothCallback bluetoothCallback = new BluetoothService.BluetoothCallback() {
+        @Override
+        public void onConnectionStateChange(boolean connected) {
+            if (getActivity() == null) return;
+            getActivity().runOnUiThread(() -> {
+                if (connected) {
+                    statusTextView.setText("Подключено, ожидание готовности...");
+                    Log.d(TAG, "Connected, waiting for services...");
+                } else {
+                    statusTextView.setText("Отключено");
+                    progressIndicator.setVisibility(View.GONE);
+                    startButton.setEnabled(true);
+                    stopButton.setEnabled(false);
+                    isReceivingData = false;
                 }
-            }, 2000);
-        } else {
-            sendDataCommand();
+            });
+        }
+
+        @Override
+        public void onServicesDiscovered(boolean success) {
+            if (getActivity() == null) return;
+            getActivity().runOnUiThread(() -> {
+                Log.d(TAG, "onServicesDiscovered callback: success=" + success);
+                if (success) {
+                    // КРИТИЧНО: Этот блок должен выполниться!
+                    Log.d(TAG, "Services ready, sending SendData command...");
+                    statusTextView.setText("Готово, отправка команды...");
+
+                    // Небольшая задержка для стабилизации
+                    mainHandler.postDelayed(() -> {
+                        sendDataCommand();
+                    }, 500);
+                } else {
+                    statusTextView.setText("Ошибка обнаружения сервисов");
+                    progressIndicator.setVisibility(View.GONE);
+                    startButton.setEnabled(true);
+                    isReceivingData = false;
+                }
+            });
+        }
+
+        @Override
+        public void onDataReceived(byte[] data, String formattedData) {
+            // Не используется
+        }
+
+        @Override
+        public void onDataBatch(String formattedBatch, long totalBytes, double kbPerSecond) {
+            if (isReceivingData) {
+                Log.d(TAG, "Received data batch: " + formattedBatch.length() + " chars");
+                processReceivedData(formattedBatch);
+            }
+        }
+
+        @Override
+        public void onError(String message) {
+            if (getActivity() == null) return;
+            getActivity().runOnUiThread(() -> {
+                Log.e(TAG, "Error: " + message);
+                Toast.makeText(getContext(), "Ошибка: " + message, Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        @Override
+        public void onReconnectAttempt(int attempt, int maxAttempts) {
+            if (getActivity() == null) return;
+            getActivity().runOnUiThread(() -> {
+                statusTextView.setText(String.format("Переподключение %d/%d", attempt, maxAttempts));
+            });
+        }
+    };
+
+    private void clearData() {
+        receivedData.clear();
+        dataBuffer.setLength(0);
+        dataTextView.setText("");
+        dataCountTextView.setText("Получено точек: 0");
+        statusTextView.setText("Данные очищены");
+        saveButton.setEnabled(false);
+    }
+
+    private String sanitizeFileName(String name) {
+        return name.replaceAll("[^a-zA-Z0-9.-]", "_");
+    }
+
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        if (bluetoothService != null) {
+            bluetoothService.close();
         }
     }
 
-    private void sendDataCommand() {
-        isReceivingData = true;
-        dataStartTime = System.currentTimeMillis();
-        statusTextView.setText("Запрос данных...");
+    private boolean autoMode = false; // Новый флаг для автоматического режима
 
-        // Отправляем команду для получения данных
-        boolean sent = bluetoothService.sendCommand("Data?\r");
+    @Override
+    public void onResume() {
+        super.onResume();
+
+        // Проверяем, нужно ли автоматически начать получение данных
+        MTDeviceActivity activity = (MTDeviceActivity) getActivity();
+        if (activity != null && activity.shouldAutoStartDataDownload()) {
+            autoMode = true;
+            activity.clearAutoStartFlag();
+
+            // Автоматически начинаем получение данных
+            new android.os.Handler().postDelayed(() -> {
+                startDataTransfer();
+            }, 500);
+        }
+    }
+
+    private void startDataTransfer() {
+        if (bluetoothService == null) {
+            bluetoothService = new BluetoothService(requireContext());
+            bluetoothService.setCallback(bluetoothCallback);
+        }
+
+        // Сбрасываем данные
+        receivedData.clear();
+        dataBuffer.setLength(0);
+        dataTextView.setText("");
+
+        statusTextView.setText("Подключение...");
+        progressIndicator.setVisibility(View.VISIBLE);
+        startButton.setEnabled(false);
+
+        // КРИТИЧНО: Подключаемся С NOTIFICATIONS сразу
+        bluetoothService.setRawTextMode(false); // Парсим Start/End
+        bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
+
+        // НЕ отправляем команду сразу, ждем callback
+        isReceivingData = true;
+    }
+
+    private void sendDataCommand() {
+        if (!bluetoothService.isConnected()) {
+            statusTextView.setText("Не подключено");
+            return;
+        }
+
+        dataStartTime = System.currentTimeMillis();
+        statusTextView.setText("Отправка команды SendData...");
+
+        // Отправляем команду - notifications УЖЕ включены
+        boolean sent = bluetoothService.sendCommand("SendData\r");
 
         if (sent) {
+            Log.d(TAG, "SendData command sent, waiting for data stream...");
             statusTextView.setText("Получение данных...");
-            startButton.setEnabled(false);
             stopButton.setEnabled(true);
-            progressIndicator.setVisibility(View.VISIBLE);
 
-            // Переключаемся на режим чтения
-            bluetoothService.disconnect();
-            mainHandler.postDelayed(() -> {
-                bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
-            }, 500);
+            // Данные начнут приходить через onDataBatch
         } else {
-            statusTextView.setText("Ошибка отправки команды");
+            Log.e(TAG, "Failed to send SendData - writeCharacteristic not available");
+            statusTextView.setText("Ошибка: не удалось отправить команду");
+
+            Toast.makeText(getContext(),
+                    "writeCharacteristic недоступна. Попробуйте отключиться и подключиться заново.",
+                    Toast.LENGTH_LONG).show();
+
             isReceivingData = false;
+            progressIndicator.setVisibility(View.GONE);
+            startButton.setEnabled(true);
         }
     }
 
@@ -203,8 +328,14 @@ public class MTDataFragment extends Fragment {
             // Парсим числовые данные
             String[] lines = data.split("\\s+");
             for (String line : lines) {
+                line = line.trim();
+                // Пропускаем "Start" и "End"
+                if (line.equals("Start") || line.equals("End")) {
+                    continue;
+                }
+
                 try {
-                    double value = Double.parseDouble(line.trim());
+                    double value = Double.parseDouble(line);
                     receivedData.add(value);
                 } catch (NumberFormatException e) {
                     // Игнорируем нечисловые данные
@@ -214,9 +345,15 @@ public class MTDataFragment extends Fragment {
             // Обновляем UI
             updateDataDisplay();
 
-            // Проверяем на окончание передачи
+            // Проверяем на окончание передачи (по "End")
             if (data.contains("End") || data.contains("END")) {
                 stopDataTransfer();
+
+                // В автоматическом режиме сразу сохраняем
+                if (autoMode && !receivedData.isEmpty()) {
+                    autoMode = false;
+                    saveDataToFile();
+                }
             }
         });
     }
@@ -285,6 +422,14 @@ public class MTDataFragment extends Fragment {
                 if (adapter != null && adapter.getGraphFragment() != null) {
                     adapter.getGraphFragment().loadAndDisplayGraph();
                 }
+
+                // Переключаемся на вкладку "График"
+                activity.runOnUiThread(() -> {
+                    androidx.viewpager2.widget.ViewPager2 viewPager = activity.findViewById(R.id.view_pager);
+                    if (viewPager != null) {
+                        viewPager.setCurrentItem(2, true); // Вкладка "График"
+                    }
+                });
             }
 
         } catch (Exception e) {
@@ -295,24 +440,4 @@ public class MTDataFragment extends Fragment {
         }
     }
 
-    private void clearData() {
-        receivedData.clear();
-        dataBuffer.setLength(0);
-        dataTextView.setText("");
-        dataCountTextView.setText("Получено точек: 0");
-        statusTextView.setText("Данные очищены");
-        saveButton.setEnabled(false);
-    }
-
-    private String sanitizeFileName(String name) {
-        return name.replaceAll("[^a-zA-Z0-9.-]", "_");
-    }
-
-    @Override
-    public void onDestroyView() {
-        super.onDestroyView();
-        if (bluetoothService != null) {
-            bluetoothService.close();
-        }
-    }
 }

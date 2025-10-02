@@ -663,6 +663,16 @@ public class BluetoothService {
 
                 BluetoothGattService service = gatt.getService(currentServiceUuid);
                 if (service != null) {
+                    // ВАЖНО: Всегда ищем write характеристику для MT устройств
+                    if (currentWriteCharacteristicUuid == null && currentCharacteristicUuid != null) {
+                        // Если подключаемся для чтения (connect), автоматически ищем запись
+                        UUID autoWriteUuid = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
+                        BluetoothGattCharacteristic writeChar = service.getCharacteristic(autoWriteUuid);
+                        if (writeChar != null) {
+                            writeCharacteristic = writeChar;
+                            Log.d(TAG, "✓ Auto-found write characteristic for MT device");
+                        }
+                    }
                     if (currentWriteCharacteristicUuid != null) {
                         writeCharacteristic = null;
 
@@ -758,6 +768,23 @@ public class BluetoothService {
             }
         }
     };
+
+    // Новый метод для MT устройств - и запись И чтение
+    public void connectForMTDevice(String deviceAddress, UUID serviceUuid,
+                                   UUID readCharacteristicUuid, UUID writeCharacteristicUuid) {
+        if (bluetoothAdapter == null || deviceAddress == null) {
+            notifyError("Bluetooth adapter not available or device address is null");
+            return;
+        }
+
+        currentDeviceAddress = deviceAddress;
+        currentServiceUuid = serviceUuid;
+        currentCharacteristicUuid = readCharacteristicUuid;
+        currentWriteCharacteristicUuid = writeCharacteristicUuid;
+
+        reconnectAttempts.set(0);
+        connectInternal();
+    }
 
     public void connectForCommands(String deviceAddress, UUID serviceUuid, UUID writeCharacteristicUuid) {
         this.currentWriteCharacteristicUuid = writeCharacteristicUuid;
@@ -1040,14 +1067,19 @@ public class BluetoothService {
     }
 
     private void notifyServicesDiscovered(boolean success) {
+        Log.d(TAG, "notifyServicesDiscovered called with success=" + success);
         if (callback != null) {
+            Log.d(TAG, "Callback exists, posting to main handler");
             mainHandler.post(() -> {
                 try {
                     callback.onServicesDiscovered(success);
+                    Log.d(TAG, "onServicesDiscovered callback executed");
                 } catch (Exception e) {
                     Log.e(TAG, "Error in services discovered callback", e);
                 }
             });
+        } else {
+            Log.w(TAG, "Callback is NULL!");
         }
     }
 
