@@ -675,10 +675,10 @@ public class MTDeviceInfoFragment extends Fragment {
     }
 
     private void requestData() {
-        // Отключаемся от текущего соединения
+        // КРИТИЧНО: Только cleanup, НЕ disconnect отдельно!
         if (mtDeviceHandler != null) {
-            mtDeviceHandler.disconnect();
-            mtDeviceHandler.cleanup();
+            mtDeviceHandler.cleanup(); // cleanup уже содержит disconnect
+            mtDeviceHandler = null; // Обнуляем для чистоты
         }
 
         // Устанавливаем флаг автозапуска
@@ -686,16 +686,18 @@ public class MTDeviceInfoFragment extends Fragment {
         if (activity != null) {
             activity.requestAutoDataDownload();
 
-            // Переключаемся на вкладку "Данные"
-            activity.runOnUiThread(() -> {
-                androidx.viewpager2.widget.ViewPager2 viewPager = activity.findViewById(R.id.view_pager);
-                if (viewPager != null) {
-                    viewPager.setCurrentItem(1, true); // Вкладка 1 = Данные
-                }
-            });
+            // Ждем немного перед переключением вкладки
+            new android.os.Handler().postDelayed(() -> {
+                activity.runOnUiThread(() -> {
+                    androidx.viewpager2.widget.ViewPager2 viewPager = activity.findViewById(R.id.view_pager);
+                    if (viewPager != null) {
+                        viewPager.setCurrentItem(1, true); // Вкладка 1 = Данные
+                    }
+                });
+            }, 300); // Задержка 300ms для корректного отключения
         }
 
-        statusText.setText("Переключение на вкладку данных...");
+        statusText.setText("Подготовка к получению данных...");
         showProgress(false);
     }
 

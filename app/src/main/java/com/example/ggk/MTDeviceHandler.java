@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MTDeviceHandler {
     private static final String TAG = "MTDeviceHandler";
@@ -476,7 +477,14 @@ public class MTDeviceHandler {
         return new HashMap<>(deviceInfo);
     }
 
+    private final AtomicBoolean isDisconnecting = new AtomicBoolean(false);
+
     public void disconnect() {
+        if (!isDisconnecting.compareAndSet(false, true)) {
+            Log.d(TAG, "Already disconnecting, skipping");
+            return;
+        }
+
         Log.d(TAG, "Disconnecting");
         cancelCommandTimeout();
 
@@ -490,6 +498,8 @@ public class MTDeviceHandler {
         isProcessing = false;
         writeReady = false;
         readReady = false;
+
+        isDisconnecting.set(false);
     }
 
     public void cleanup() {

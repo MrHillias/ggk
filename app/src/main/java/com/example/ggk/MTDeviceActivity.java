@@ -49,6 +49,9 @@ public class MTDeviceActivity extends AppCompatActivity {
         pagerAdapter = new MTPagerAdapter(this);
         viewPager.setAdapter(pagerAdapter);
 
+        // ВАЖНО: Отключаем предзагрузку соседних страниц
+        viewPager.setOffscreenPageLimit(ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT);
+
         new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
             switch (position) {
                 case 0:

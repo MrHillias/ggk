@@ -157,6 +157,7 @@ public class MTDataFragment extends Fragment {
     private final BluetoothService.BluetoothCallback bluetoothCallback = new BluetoothService.BluetoothCallback() {
         @Override
         public void onConnectionStateChange(boolean connected) {
+            Log.d(TAG, "=== CALLBACK: onConnectionStateChange: " + connected + " ===");
             if (getActivity() == null) return;
             getActivity().runOnUiThread(() -> {
                 if (connected) {
@@ -174,6 +175,7 @@ public class MTDataFragment extends Fragment {
 
         @Override
         public void onServicesDiscovered(boolean success) {
+            Log.d(TAG, "=== CALLBACK: onServicesDiscovered: " + success + " ===");
             if (getActivity() == null) return;
             getActivity().runOnUiThread(() -> {
                 Log.d(TAG, "onServicesDiscovered callback: success=" + success);
@@ -210,15 +212,16 @@ public class MTDataFragment extends Fragment {
 
         @Override
         public void onError(String message) {
+            Log.d(TAG, "=== CALLBACK: onError: " + message + " ===");
             if (getActivity() == null) return;
             getActivity().runOnUiThread(() -> {
-                Log.e(TAG, "Error: " + message);
                 Toast.makeText(getContext(), "Ошибка: " + message, Toast.LENGTH_SHORT).show();
             });
         }
 
         @Override
         public void onReconnectAttempt(int attempt, int maxAttempts) {
+            Log.d(TAG, "=== CALLBACK: onReconnectAttempt: " + attempt + "/" + maxAttempts + " ===");
             if (getActivity() == null) return;
             getActivity().runOnUiThread(() -> {
                 statusTextView.setText(String.format("Переподключение %d/%d", attempt, maxAttempts));
@@ -261,16 +264,25 @@ public class MTDataFragment extends Fragment {
 
             // Автоматически начинаем получение данных
             new android.os.Handler().postDelayed(() -> {
+                Log.d(TAG, "AUTO MODE: Starting data transfer automatically");
                 startDataTransfer();
             }, 500);
         }
     }
-
     private void startDataTransfer() {
-        if (bluetoothService == null) {
-            bluetoothService = new BluetoothService(requireContext());
-            bluetoothService.setCallback(bluetoothCallback);
+        Log.d(TAG, "=== startDataTransfer CALLED ===");
+        Log.d(TAG, "autoMode: " + autoMode);
+
+        // КРИТИЧНО: Создаем новый BluetoothService И устанавливаем callback ДО подключения
+        if (bluetoothService != null) {
+            bluetoothService.close();
+            bluetoothService = null;
         }
+
+        bluetoothService = new BluetoothService(requireContext());
+        bluetoothService.setCallback(bluetoothCallback); // ВАЖНО: ДО connect()!
+
+        Log.d(TAG, "BluetoothService created, callback set");
 
         // Сбрасываем данные
         receivedData.clear();
@@ -283,9 +295,9 @@ public class MTDataFragment extends Fragment {
 
         // КРИТИЧНО: Подключаемся С NOTIFICATIONS сразу
         bluetoothService.setRawTextMode(false); // Парсим Start/End
+        Log.d(TAG, "Connecting to device...");
         bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
 
-        // НЕ отправляем команду сразу, ждем callback
         isReceivingData = true;
     }
 
