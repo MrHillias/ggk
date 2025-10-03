@@ -162,12 +162,29 @@ public class ConnectedDevicesFragment extends Fragment {
                     public void onDeviceClick(DeviceInfo device) {
                         MainActivity mainActivity = (MainActivity) getActivity();
                         if (mainActivity != null) {
-                            mainActivity.openDeviceDetailsWithFolder(
-                                    device.address,
-                                    device.getDisplayName(),
-                                    device.folderName,  // Передаем имя папки
-                                    true
+                            // Проверяем, является ли это MT-устройством
+                            boolean isMTDevice = MTDeviceDataHelper.isMTDevice(
+                                    requireContext(),
+                                    device.folderName
                             );
+
+                            if (isMTDevice) {
+                                // Для MT-устройств открываем только график через DeviceActivity
+                                mainActivity.openDeviceDetailsWithFolder(
+                                        device.address,
+                                        device.getDisplayName(),
+                                        device.folderName,
+                                        true  // isFromHistory = true
+                                );
+                            } else {
+                                // Для обычных устройств - стандартная логика
+                                mainActivity.openDeviceDetailsWithFolder(
+                                        device.address,
+                                        device.getDisplayName(),
+                                        device.folderName,
+                                        true
+                                );
+                            }
                         }
                     }
 
@@ -513,10 +530,13 @@ public class ConnectedDevicesFragment extends Fragment {
         PopupMenu popupMenu = new PopupMenu(requireContext(), anchor);
         popupMenu.getMenuInflater().inflate(R.menu.device_options_menu, popupMenu.getMenu());
 
-        // Показываем пункт "Докачать данные" только для доступных устройств
+        // Проверяем, является ли это MT-устройством
+        boolean isMTDevice = MTDeviceDataHelper.isMTDevice(requireContext(), device.folderName);
+
+        // Показываем пункт "Докачать данные" только для доступных НЕ-MT устройств
         MenuItem syncItem = popupMenu.getMenu().findItem(R.id.action_sync);
         if (syncItem != null) {
-            syncItem.setVisible(device.isAvailable);
+            syncItem.setVisible(device.isAvailable && !isMTDevice);
         }
 
         popupMenu.setOnMenuItemClickListener(item -> {
@@ -669,6 +689,14 @@ public class ConnectedDevicesFragment extends Fragment {
 
     private void showDeviceInfoDialog(DeviceInfo device) {
         StringBuilder info = new StringBuilder();
+
+        // Проверяем, является ли это MT-устройством
+        boolean isMTDevice = MTDeviceDataHelper.isMTDevice(requireContext(), device.folderName);
+
+        if (isMTDevice) {
+            info.append("Тип: MT-устройство\n");
+        }
+
         info.append("Название: ").append(device.getDisplayName()).append("\n");
         if (device.customName != null) {
             info.append("Оригинальное имя: ").append(device.originalName).append("\n");

@@ -22,13 +22,13 @@
         <!-- Единицы измерения -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/units_layout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
             android:hint="Единицы измерения">
 
-            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+            <AutoCompleteTextView
                 android:id="@+id/units_dropdown"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -39,13 +39,13 @@
         <!-- Диапазон измерений -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/range_layout"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
             android:hint="Диапазон измерений">
 
-            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+            <AutoCompleteTextView
                 android:id="@+id/range_dropdown"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -101,7 +101,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/reset_button"
-                style="@style/Widget.Material3.Button.OutlinedButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -114,8 +114,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-            app:cardElevation="0dp">
+            app:cardBackgroundColor="#F5F5F5"
+            app:cardElevation="2dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -128,7 +128,7 @@
                     android:layout_height="24dp"
                     android:layout_marginEnd="12dp"
                     android:src="@drawable/ic_info"
-                    app:tint="?attr/colorOnSurfaceVariant" />
+                    app:tint="#666666" />
 
                 <TextView
                     android:layout_width="0dp"
@@ -136,7 +136,7 @@
                     android:layout_weight="1"
                     android:text="Изменения будут применены сразу после отправки команд на устройство. Некоторые настройки могут потребовать перезапуска устройства."
                     android:textSize="12sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
+                    android:textColor="#666666" />
 
             </LinearLayout>
 

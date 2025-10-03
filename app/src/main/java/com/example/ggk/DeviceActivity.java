@@ -17,6 +17,7 @@ public class DeviceActivity extends AppCompatActivity {
     private boolean isFromHistory;
     private boolean isSyncMode;
     private long lastSyncTime;
+    private boolean isMTDevice; // Новое поле для определения MT-устройства
 
     private TabLayout tabLayout;
     private ViewPager2 viewPager;
@@ -40,8 +41,17 @@ public class DeviceActivity extends AppCompatActivity {
             deviceFolderName = deviceName;
         }
 
+        // Проверяем, является ли это MT-устройством
+        isMTDevice = MTDeviceDataHelper.isMTDevice(this, deviceFolderName);
+
         // Устанавливаем заголовок
-        setTitle(deviceName + (isSyncMode ? " - Синхронизация" : ""));
+        String title = deviceName;
+        if (isSyncMode) {
+            title += " - Синхронизация";
+        } else if (isMTDevice && isFromHistory) {
+            title += " (MT)";
+        }
+        setTitle(title);
 
         // Включаем кнопку "назад" в ActionBar
         if (getSupportActionBar() != null) {
@@ -56,31 +66,40 @@ public class DeviceActivity extends AppCompatActivity {
     }
 
     private void setupTabs() {
-        pagerAdapter = new DevicePagerAdapter(this, deviceAddress, deviceName, deviceFolderName, isFromHistory);
+        pagerAdapter = new DevicePagerAdapter(this, deviceAddress, deviceName, deviceFolderName, isFromHistory, isMTDevice);
         viewPager.setAdapter(pagerAdapter);
 
         new TabLayoutMediator(tabLayout, viewPager, (tab, position) -> {
-            switch (position) {
-                case 0:
-                    tab.setText("Данные");
-                    break;
-                case 1:
-                    tab.setText("График");
-                    break;
-                case 2:
-                    tab.setText("Управление");
-                    break;
+            // Для MT-устройств из истории показываем только "График"
+            if (isMTDevice && isFromHistory) {
+                tab.setText("График");
+            } else {
+                // Для обычных устройств - стандартные вкладки
+                switch (position) {
+                    case 0:
+                        tab.setText("Данные");
+                        break;
+                    case 1:
+                        tab.setText("График");
+                        break;
+                    case 2:
+                        tab.setText("Управление");
+                        break;
+                }
             }
         }).attach();
 
         // Если загружаем из истории и есть сохраненные данные, активируем вторую вкладку
-        if (isFromHistory) {
+        if (isFromHistory && !isMTDevice) {
             // Проверяем наличие данных для графика
             DataGraphFragment graphFragment = pagerAdapter.getGraphFragment();
             if (graphFragment != null && graphFragment.hasDataForGraph()) {
                 // Активируем вторую вкладку после небольшой задержки
                 viewPager.postDelayed(() -> viewPager.setCurrentItem(1), 100);
             }
+        } else if (isMTDevice && isFromHistory) {
+            // Для MT-устройств сразу показываем график (единственная вкладка)
+            viewPager.setCurrentItem(0, false);
         }
     }
 
@@ -89,9 +108,11 @@ public class DeviceActivity extends AppCompatActivity {
         onBackPressed();
         return true;
     }
+
     public String getDeviceFolderName() {
         return deviceFolderName;
     }
+
     public String getDeviceAddress() {
         return deviceAddress;
     }

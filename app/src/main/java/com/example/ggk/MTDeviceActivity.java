@@ -66,10 +66,6 @@ public class MTDeviceActivity extends AppCompatActivity {
                     tab.setText("График");
                     tab.setIcon(R.drawable.ic_chart);
                     break;
-                case 3:
-                    tab.setText("Настройки");
-                    tab.setIcon(R.drawable.ic_settings);
-                    break;
             }
         }).attach();
     }
@@ -101,7 +97,6 @@ public class MTDeviceActivity extends AppCompatActivity {
         private MTDeviceInfoFragment infoFragment;
         private MTDataFragment dataFragment;
         private DataGraphFragment graphFragment;
-        private MTSettingsFragment settingsFragment;
 
         public MTPagerAdapter(FragmentActivity activity) {
             super(activity);
@@ -125,11 +120,6 @@ public class MTDeviceActivity extends AppCompatActivity {
                         graphFragment = new DataGraphFragment();
                     }
                     return graphFragment;
-                case 3:
-                    if (settingsFragment == null) {
-                        settingsFragment = new MTSettingsFragment();
-                    }
-                    return settingsFragment;
                 default:
                     throw new IllegalArgumentException("Invalid position: " + position);
             }
@@ -137,7 +127,7 @@ public class MTDeviceActivity extends AppCompatActivity {
 
         @Override
         public int getItemCount() {
-            return 4; // 4 вкладки
+            return 3; // Теперь 3 вкладки вместо 4
         }
 
         public MTDeviceInfoFragment getInfoFragment() {
@@ -150,10 +140,6 @@ public class MTDeviceActivity extends AppCompatActivity {
 
         public DataGraphFragment getGraphFragment() {
             return graphFragment;
-        }
-
-        public MTSettingsFragment getSettingsFragment() {
-            return settingsFragment;
         }
     }
 
