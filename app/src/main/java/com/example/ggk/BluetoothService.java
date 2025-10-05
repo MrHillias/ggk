@@ -337,44 +337,25 @@ public class BluetoothService {
                 }
             } else {
                 // НОВАЯ ЛОГИКА: Обрабатываем пары байтов
-                numericBuffer.add(value);
 
-                // Проверяем на последовательность End\r\n (5 байтов)
-                if (numericBuffer.size() >= 5) {
-                    int size = numericBuffer.size();
-                    if (numericBuffer.get(size - 5) == 69 &&  // 'E'
-                            numericBuffer.get(size - 4) == 110 &&  // 'n'
-                            numericBuffer.get(size - 3) == 100 &&  // 'd'
-                            numericBuffer.get(size - 2) == 13 &&   // '\r'
-                            numericBuffer.get(size - 1) == 10) {   // '\n'
+                if (value == 69 && i + 4 < data.length &&
+                        (data[i+1] & 0xFF) == 110 &&
+                        (data[i+2] & 0xFF) == 100 &&
+                        (data[i+3] & 0xFF) == 13 &&
+                        (data[i+4] & 0xFF) == 10) {
 
-                        Log.d(TAG, "Found 'End\\r\\n' sequence in numeric mode");
+                    Log.d(TAG, "Found 'End\\r\\n' in data stream");
+                    result.append("End ");  // Добавляем только маркер
 
-                        // Убираем последние 5 байтов (End\r\n) из результата
-                        String currentResult = result.toString();
-                        String[] parts = currentResult.trim().split("\\s+");
-
-                        if (parts.length >= 5) {
-                            StringBuilder newResult = new StringBuilder();
-                            for (int j = 0; j < parts.length - 5; j++) {
-                                newResult.append(parts[j]).append(" ");
-                            }
-                            newResult.append("End\n");
-
-                            result.setLength(0);
-                            result.append(newResult.toString());
-
-                            numericBuffer.clear();
-
-                            if (callback != null) {
-                                mainHandler.post(() -> callback.onError("Found 'End' sequence - data transmission complete"));
-                            }
-
-                            continue;
-                        }
+                    if (callback != null) {
+                        mainHandler.post(() -> callback.onError("Found 'End' sequence"));
                     }
+
+                    numericBuffer.clear();
+                    break;  // Останавливаем обработку после End
                 }
 
+                numericBuffer.add(value);
                 // Просто добавляем байт (парная обработка будет при парсинге)
                 result.append(value).append(" ");
             }

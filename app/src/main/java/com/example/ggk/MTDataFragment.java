@@ -34,6 +34,8 @@ public class MTDataFragment extends Fragment {
     private static final UUID WRITE_UUID = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
     private static final UUID READ_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb");
 
+    private Integer pendingByte = null;  // Непарный байт из предыдущего chunk'а
+
     private String deviceAddress;
     private String deviceName;
 
@@ -237,6 +239,7 @@ public class MTDataFragment extends Fragment {
         dataCountTextView.setText("Получено точек: 0");
         statusTextView.setText("Данные очищены");
         saveButton.setEnabled(false);
+        pendingByte = null;  // НОВОЕ: Сбрасываем pending byte
     }
 
     private String sanitizeFileName(String name) {
@@ -427,6 +430,7 @@ public class MTDataFragment extends Fragment {
         mainHandler.post(() -> {
             Log.d(TAG, "=== processReceivedData ===");
             Log.d(TAG, "Current receivedData.size BEFORE processing: " + receivedData.size());
+            Log.d(TAG, "Pending byte from previous chunk: " + pendingByte);
 
             dataBuffer.append(data);
 
@@ -442,6 +446,13 @@ public class MTDataFragment extends Fragment {
             // Собираем байтовые значения
             String[] lines = processedData.split("\\s+");
             List<Integer> byteValues = new ArrayList<>();
+
+            // НОВОЕ: Если есть непарный байт из предыдущего chunk'а, добавляем его первым
+            if (pendingByte != null) {
+                byteValues.add(pendingByte);
+                Log.d(TAG, "Added pending byte from previous chunk: " + pendingByte);
+                pendingByte = null;
+            }
 
             for (String line : lines) {
                 line = line.trim();
@@ -459,8 +470,14 @@ public class MTDataFragment extends Fragment {
 
             Log.d(TAG, "Extracted " + byteValues.size() + " byte values from this chunk");
 
+            // НОВОЕ: Если количество байтов нечетное, сохраняем последний на потом
+            if (byteValues.size() % 2 == 1) {
+                pendingByte = byteValues.remove(byteValues.size() - 1);
+                Log.d(TAG, "Saved last byte for next chunk: " + pendingByte);
+            }
+
             // НОВОЕ: Логируем последние 20 байтов
-            if (byteValues.size() > 20) {
+            if (byteValues.size() >= 20) {
                 StringBuilder lastBytes = new StringBuilder("Last 20 bytes: ");
                 for (int i = byteValues.size() - 20; i < byteValues.size(); i++) {
                     lastBytes.append(byteValues.get(i)).append(" ");
@@ -477,12 +494,29 @@ public class MTDataFragment extends Fragment {
                 short signedValue = (short)((highByte << 8) | lowByte);
                 receivedData.add((double)signedValue);
 
+                // НОВОЕ: Детектируем аномальные значения (выбросы > 1000 или < -1000)
+                if (Math.abs(signedValue) > 1000) {
+                    Log.w(TAG, String.format("⚠️ ANOMALY at position %d: [%3d, %3d] -> %6d (total points: %d)",
+                            receivedData.size() - 1, lowByte, highByte, signedValue, receivedData.size()));
+
+                    // Логируем контекст (предыдущие и следующие значения)
+                    if (receivedData.size() > 1) {
+                        Log.w(TAG, "  Previous value: " + receivedData.get(receivedData.size() - 2));
+                    }
+                    if (i + 3 < byteValues.size()) {
+                        int nextLow = byteValues.get(i + 2);
+                        int nextHigh = byteValues.get(i + 3);
+                        short nextValue = (short)((nextHigh << 8) | nextLow);
+                        Log.w(TAG, String.format("  Next pair will be: [%3d, %3d] -> %6d", nextLow, nextHigh, nextValue));
+                    }
+                }
+
                 if (receivedData.size() <= 5) {
                     Log.d(TAG, String.format("Pair: [%3d, %3d] -> int16: %6d",
                             lowByte, highByte, signedValue));
                 }
 
-                // НОВОЕ: Логируем последние 10 пар
+                // Логируем последние 10 пар
                 if (i >= byteValues.size() - 20 && i < byteValues.size() - 1) {
                     Log.d(TAG, String.format("LAST Pair %d: [%3d, %3d] -> int16: %6d",
                             i/2, lowByte, highByte, signedValue));
@@ -501,7 +535,13 @@ public class MTDataFragment extends Fragment {
                 Log.d(TAG, "=== END SEQUENCE DETECTED ===");
                 Log.d(TAG, "Final receivedData.size: " + receivedData.size());
 
-                // НОВОЕ: Выводим последние 15 значений из receivedData
+                // Проверяем, остался ли непарный байт
+                if (pendingByte != null) {
+                    Log.w(TAG, "WARNING: Data ended with unpaired byte: " + pendingByte);
+                    pendingByte = null;
+                }
+
+                // Выводим последние 15 значений
                 StringBuilder lastValues = new StringBuilder("Last 15 receivedData values: ");
                 int startIdx = Math.max(0, receivedData.size() - 15);
                 for (int i = startIdx; i < receivedData.size(); i++) {
@@ -518,6 +558,7 @@ public class MTDataFragment extends Fragment {
             }
         });
     }
+
 
     private void updateDataDisplay() {
         dataCountTextView.setText(String.format("Получено точек: %d", receivedData.size()));
