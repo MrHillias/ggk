@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="16dp"
+    android:layout_marginEnd="16dp"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="4dp"
+    app:cardCornerRadius="12dp"
+    app:cardElevation="2dp"
+    app:strokeWidth="0dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:gravity="center_vertical">
+
+        <!-- Индекс точки -->
+        <TextView
+            android:id="@+id/point_index"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:background="@drawable/circle_background"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:text="1"/>
+
+        <!-- Информация о данных -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="16dp">
+
+            <!-- Метка времени -->
+            <TextView
+                android:id="@+id/timestamp_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="12:34:56"
+                android:textSize="12sp"
+                android:textColor="@android:color/darker_gray"
+                android:fontFamily="sans-serif-medium"/>
+
+            <!-- Дата -->
+            <TextView
+                android:id="@+id/date_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="05.10.2025"
+                android:textSize="10sp"
+                android:textColor="@android:color/darker_gray"
+                android:layout_marginTop="2dp"/>
+
+        </LinearLayout>
+
+        <!-- Значение давления -->
+        <TextView
+            android:id="@+id/pressure_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-20"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="@color/md_theme_primary"
+            android:fontFamily="sans-serif-condensed"
+            android:layout_marginStart="16dp"/>
+
+        <!-- Единица измерения -->
+        <TextView
+            android:id="@+id/unit_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Па"
+            android:textSize="14sp"
+            android:textColor="@android:color/darker_gray"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="8dp"/>
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

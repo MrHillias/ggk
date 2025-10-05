@@ -12,15 +12,14 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.widget.NestedScrollView;
 import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -33,13 +32,13 @@ public class MTDataFragment extends Fragment {
     private static final UUID SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb");
     private static final UUID WRITE_UUID = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
     private static final UUID READ_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb");
+    private static final long DATA_TIMEOUT = 3000; // 3 секунды без данных = конец передачи
 
     private Integer pendingByte = null;  // Непарный байт из предыдущего chunk'а
 
     private String deviceAddress;
     private String deviceName;
 
-    private TextView dataTextView;
     private TextView statusTextView;
     private TextView dataCountTextView;
     private LinearProgressIndicator progressIndicator;
@@ -47,7 +46,9 @@ public class MTDataFragment extends Fragment {
     private MaterialButton stopButton;
     private MaterialButton saveButton;
     private MaterialButton clearButton;
-    private NestedScrollView scrollView;
+    private RecyclerView dataRecyclerView;
+    private View emptyState;
+    private MTDataAdapter dataAdapter;
 
     private BluetoothService bluetoothService;
     private Handler mainHandler;
@@ -56,6 +57,7 @@ public class MTDataFragment extends Fragment {
     private boolean isReceivingData = false;
     private boolean appendMode = false;
     private long dataStartTime;
+    private long lastDataReceivedTime = 0;
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -75,7 +77,6 @@ public class MTDataFragment extends Fragment {
                              @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_mt_data, container, false);
 
-        dataTextView = view.findViewById(R.id.data_text_view);
         statusTextView = view.findViewById(R.id.status_text_view);
         dataCountTextView = view.findViewById(R.id.data_count_text_view);
         progressIndicator = view.findViewById(R.id.progress_indicator);
@@ -83,12 +84,23 @@ public class MTDataFragment extends Fragment {
         stopButton = view.findViewById(R.id.stop_button);
         saveButton = view.findViewById(R.id.save_button);
         clearButton = view.findViewById(R.id.clear_button);
-        scrollView = view.findViewById(R.id.scroll_view);
+        dataRecyclerView = view.findViewById(R.id.data_recycler_view);
+        emptyState = view.findViewById(R.id.empty_state);
 
+        setupRecyclerView();
         setupButtons();
         initializeBluetooth();
 
         return view;
+    }
+
+    private void setupRecyclerView() {
+        dataAdapter = new MTDataAdapter();
+        dataRecyclerView.setAdapter(dataAdapter);
+        dataRecyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
+
+        // Показываем пустое состояние по умолчанию
+        updateEmptyState();
     }
 
     private void setupButtons() {
@@ -156,7 +168,6 @@ public class MTDataFragment extends Fragment {
         });
     }
 
-
     private final BluetoothService.BluetoothCallback bluetoothCallback = new BluetoothService.BluetoothCallback() {
         @Override
         public void onConnectionStateChange(boolean connected) {
@@ -183,11 +194,9 @@ public class MTDataFragment extends Fragment {
             getActivity().runOnUiThread(() -> {
                 Log.d(TAG, "onServicesDiscovered callback: success=" + success);
                 if (success) {
-                    // КРИТИЧНО: Этот блок должен выполниться!
                     Log.d(TAG, "Services ready, sending SendData command...");
                     statusTextView.setText("Готово, отправка команды...");
 
-                    // Небольшая задержка для стабилизации
                     mainHandler.postDelayed(() -> {
                         sendDataCommand();
                     }, 500);
@@ -235,11 +244,20 @@ public class MTDataFragment extends Fragment {
     private void clearData() {
         receivedData.clear();
         dataBuffer.setLength(0);
-        dataTextView.setText("");
+        dataAdapter.submitList(new ArrayList<>());
+        updateEmptyState();
         dataCountTextView.setText("Получено точек: 0");
         statusTextView.setText("Данные очищены");
         saveButton.setEnabled(false);
-        pendingByte = null;  // НОВОЕ: Сбрасываем pending byte
+        pendingByte = null;
+        lastDataReceivedTime = 0;
+        mainHandler.removeCallbacks(dataTimeoutRunnable);
+    }
+
+    private void updateEmptyState() {
+        boolean isEmpty = receivedData.isEmpty();
+        emptyState.setVisibility(isEmpty ? View.VISIBLE : View.GONE);
+        dataRecyclerView.setVisibility(isEmpty ? View.GONE : View.VISIBLE);
     }
 
     private String sanitizeFileName(String name) {
@@ -249,44 +267,41 @@ public class MTDataFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        mainHandler.removeCallbacks(dataTimeoutRunnable);
         if (bluetoothService != null) {
             bluetoothService.close();
         }
     }
 
-    private boolean autoMode = false; // Новый флаг для автоматического режима
+    private boolean autoMode = false;
 
     @Override
     public void onResume() {
         super.onResume();
 
-        // Проверяем, нужно ли автоматически начать получение данных
         MTDeviceActivity activity = (MTDeviceActivity) getActivity();
         if (activity != null && activity.shouldAutoStartDataDownload()) {
             autoMode = true;
             activity.clearAutoStartFlag();
 
-            // Автоматически начинаем получение данных
             new android.os.Handler().postDelayed(() -> {
                 Log.d(TAG, "AUTO MODE: Starting data transfer automatically");
                 startDataTransfer();
             }, 500);
         }
     }
+
     private void startDataTransfer() {
         Log.d(TAG, "=== startDataTransfer CALLED ===");
 
-        // Проверяем, есть ли уже сохраненные данные
         File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
         File dataFile = new File(deviceFolder, "data.txt");
 
         if (dataFile.exists() && dataFile.length() > 0) {
             Log.d(TAG, "Found existing data file, size: " + dataFile.length());
 
-            // Считаем количество существующих точек
             int existingPoints = countDataPoints(dataFile);
 
-            // Спрашиваем пользователя
             new com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Данные уже существуют")
                     .setMessage(String.format("Найдено %d точек данных. Что сделать?", existingPoints))
@@ -307,32 +322,32 @@ public class MTDataFragment extends Fragment {
             continueDataTransfer();
         }
     }
+
     private void continueDataTransfer() {
         Log.d(TAG, "=== continueDataTransfer ===");
         Log.d(TAG, "autoMode: " + autoMode);
 
-        // КРИТИЧНО: Создаем новый BluetoothService И устанавливаем callback ДО подключения
         if (bluetoothService != null) {
             bluetoothService.close();
             bluetoothService = null;
         }
 
         bluetoothService = new BluetoothService(requireContext());
-        bluetoothService.setCallback(bluetoothCallback); // ВАЖНО: ДО connect()!
+        bluetoothService.setCallback(bluetoothCallback);
 
         Log.d(TAG, "BluetoothService created, callback set");
 
-        // Сбрасываем данные
         receivedData.clear();
         dataBuffer.setLength(0);
-        dataTextView.setText("");
+        dataAdapter.submitList(new ArrayList<>());
+        updateEmptyState();
+        lastDataReceivedTime = 0;
 
         statusTextView.setText("Подключение...");
         progressIndicator.setVisibility(View.VISIBLE);
         startButton.setEnabled(false);
 
-        // КРИТИЧНО: Подключаемся С NOTIFICATIONS сразу
-        bluetoothService.setRawTextMode(false); // Парсим Start/End
+        bluetoothService.setRawTextMode(false);
         Log.d(TAG, "Connecting to device...");
         bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
 
@@ -361,12 +376,12 @@ public class MTDataFragment extends Fragment {
                 file.seek(filePointer);
                 int readByte = file.readByte();
 
-                if (readByte == 0xA) { // LF
+                if (readByte == 0xA) {
                     if (filePointer < fileLength) {
                         lastLine = sb.reverse().toString();
                         break;
                     }
-                } else if (readByte != 0xD) { // Ignore CR
+                } else if (readByte != 0xD) {
                     sb.append((char) readByte);
                 }
             }
@@ -394,6 +409,7 @@ public class MTDataFragment extends Fragment {
 
         return 0;
     }
+
     private void sendDataCommand() {
         if (!bluetoothService.isConnected()) {
             statusTextView.setText("Не подключено");
@@ -401,17 +417,17 @@ public class MTDataFragment extends Fragment {
         }
 
         dataStartTime = System.currentTimeMillis();
+        lastDataReceivedTime = dataStartTime;
         statusTextView.setText("Отправка команды SendData...");
 
-        // Отправляем команду - notifications УЖЕ включены
         boolean sent = bluetoothService.sendCommand("SendData\r");
 
         if (sent) {
-            Log.d(TAG, "SendData command sent, waiting for data stream...");
+            Log.d(TAG, "SendData command sent, waiting for data stream (no Begin/End markers)...");
             statusTextView.setText("Получение данных...");
             stopButton.setEnabled(true);
 
-            // Данные начнут приходить через onDataBatch
+            mainHandler.postDelayed(dataTimeoutRunnable, DATA_TIMEOUT);
         } else {
             Log.e(TAG, "Failed to send SendData - writeCharacteristic not available");
             statusTextView.setText("Ошибка: не удалось отправить команду");
@@ -434,20 +450,9 @@ public class MTDataFragment extends Fragment {
 
             dataBuffer.append(data);
 
-            // КРИТИЧНО: Убираем "End\r\n" из данных перед парсингом
-            String processedData = data;
-            int endIndex = processedData.indexOf("End");
-            if (endIndex != -1) {
-                processedData = processedData.substring(0, endIndex);
-                Log.d(TAG, "Found 'End' in data, trimmed from " + data.length() +
-                        " to " + processedData.length() + " chars");
-            }
-
-            // Собираем байтовые значения
-            String[] lines = processedData.split("\\s+");
+            String[] lines = data.split("\\s+");
             List<Integer> byteValues = new ArrayList<>();
 
-            // НОВОЕ: Если есть непарный байт из предыдущего chunk'а, добавляем его первым
             if (pendingByte != null) {
                 byteValues.add(pendingByte);
                 Log.d(TAG, "Added pending byte from previous chunk: " + pendingByte);
@@ -456,7 +461,7 @@ public class MTDataFragment extends Fragment {
 
             for (String line : lines) {
                 line = line.trim();
-                if (line.equals("Start") || line.isEmpty()) {
+                if (line.isEmpty()) {
                     continue;
                 }
 
@@ -470,13 +475,11 @@ public class MTDataFragment extends Fragment {
 
             Log.d(TAG, "Extracted " + byteValues.size() + " byte values from this chunk");
 
-            // НОВОЕ: Если количество байтов нечетное, сохраняем последний на потом
             if (byteValues.size() % 2 == 1) {
                 pendingByte = byteValues.remove(byteValues.size() - 1);
                 Log.d(TAG, "Saved last byte for next chunk: " + pendingByte);
             }
 
-            // НОВОЕ: Логируем последние 20 байтов
             if (byteValues.size() >= 20) {
                 StringBuilder lastBytes = new StringBuilder("Last 20 bytes: ");
                 for (int i = byteValues.size() - 20; i < byteValues.size(); i++) {
@@ -485,42 +488,41 @@ public class MTDataFragment extends Fragment {
                 Log.d(TAG, lastBytes.toString());
             }
 
-            // Обрабатываем попарно как signed int16
             int beforeSize = receivedData.size();
+            int anomalyCount = 0;
+
             for (int i = 0; i < byteValues.size() - 1; i += 2) {
                 int lowByte = byteValues.get(i);
                 int highByte = byteValues.get(i + 1);
 
                 short signedValue = (short)((highByte << 8) | lowByte);
-                receivedData.add((double)signedValue);
 
-                // НОВОЕ: Детектируем аномальные значения (выбросы > 1000 или < -1000)
-                if (Math.abs(signedValue) > 1000) {
-                    Log.w(TAG, String.format("⚠️ ANOMALY at position %d: [%3d, %3d] -> %6d (total points: %d)",
-                            receivedData.size() - 1, lowByte, highByte, signedValue, receivedData.size()));
+                // КРИТИЧНО: Фильтруем аномальные значения
+                // Паттерн: lowByte = 0x00 и |value| > 1000 = явный мусор
+                boolean isAnomaly = (lowByte == 0 && Math.abs(signedValue) > 1000);
 
-                    // Логируем контекст (предыдущие и следующие значения)
-                    if (receivedData.size() > 1) {
-                        Log.w(TAG, "  Previous value: " + receivedData.get(receivedData.size() - 2));
-                    }
-                    if (i + 3 < byteValues.size()) {
-                        int nextLow = byteValues.get(i + 2);
-                        int nextHigh = byteValues.get(i + 3);
-                        short nextValue = (short)((nextHigh << 8) | nextLow);
-                        Log.w(TAG, String.format("  Next pair will be: [%3d, %3d] -> %6d", nextLow, nextHigh, nextValue));
-                    }
+                if (isAnomaly) {
+                    anomalyCount++;
+                    Log.w(TAG, String.format("⚠️ FILTERED ANOMALY: [%3d, %3d] -> %6d (skipped)",
+                            lowByte, highByte, signedValue));
+                    continue;
                 }
+
+                receivedData.add((double)signedValue);
 
                 if (receivedData.size() <= 5) {
                     Log.d(TAG, String.format("Pair: [%3d, %3d] -> int16: %6d",
                             lowByte, highByte, signedValue));
                 }
 
-                // Логируем последние 10 пар
                 if (i >= byteValues.size() - 20 && i < byteValues.size() - 1) {
                     Log.d(TAG, String.format("LAST Pair %d: [%3d, %3d] -> int16: %6d",
                             i/2, lowByte, highByte, signedValue));
                 }
+            }
+
+            if (anomalyCount > 0) {
+                Log.w(TAG, "Filtered out " + anomalyCount + " anomalous values");
             }
 
             int addedCount = receivedData.size() - beforeSize;
@@ -531,17 +533,20 @@ public class MTDataFragment extends Fragment {
 
             updateDataDisplay();
 
-            if (data.contains("End") || data.contains("END")) {
-                Log.d(TAG, "=== END SEQUENCE DETECTED ===");
+            lastDataReceivedTime = System.currentTimeMillis();
+
+            mainHandler.removeCallbacks(dataTimeoutRunnable);
+            mainHandler.postDelayed(dataTimeoutRunnable, DATA_TIMEOUT);
+        });
+    }
+
+    private final Runnable dataTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isReceivingData) {
+                Log.d(TAG, "=== DATA TIMEOUT - NO NEW DATA FOR " + DATA_TIMEOUT + "ms ===");
                 Log.d(TAG, "Final receivedData.size: " + receivedData.size());
 
-                // Проверяем, остался ли непарный байт
-                if (pendingByte != null) {
-                    Log.w(TAG, "WARNING: Data ended with unpaired byte: " + pendingByte);
-                    pendingByte = null;
-                }
-
-                // Выводим последние 15 значений
                 StringBuilder lastValues = new StringBuilder("Last 15 receivedData values: ");
                 int startIdx = Math.max(0, receivedData.size() - 15);
                 for (int i = startIdx; i < receivedData.size(); i++) {
@@ -556,27 +561,30 @@ public class MTDataFragment extends Fragment {
                     saveDataToFile();
                 }
             }
-        });
-    }
-
+        }
+    };
 
     private void updateDataDisplay() {
         dataCountTextView.setText(String.format("Получено точек: %d", receivedData.size()));
 
-        // Показываем последние 100 точек
-        StringBuilder display = new StringBuilder();
-        int startIndex = Math.max(0, receivedData.size() - 100);
-        for (int i = startIndex; i < receivedData.size(); i++) {
-            display.append(String.format("%.2f ", receivedData.get(i)));
-            if ((i - startIndex + 1) % 10 == 0) {
-                display.append("\n");
-            }
+        // Создаем список точек данных с метками времени
+        List<MTDataAdapter.DataPoint> dataPoints = new ArrayList<>();
+
+        for (int i = 0; i < receivedData.size(); i++) {
+            // Вычисляем временную метку для каждой точки (1 секунда = 1 точка)
+            long timestamp = dataStartTime + (i * 1000L);
+            dataPoints.add(new MTDataAdapter.DataPoint(i, receivedData.get(i), timestamp));
         }
 
-        dataTextView.setText(display.toString());
+        // Обновляем адаптер
+        dataAdapter.submitList(dataPoints);
+        updateEmptyState();
 
-        // Автопрокрутка вниз
-        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+        // Автопрокрутка к последнему элементу
+        if (!dataPoints.isEmpty()) {
+            dataRecyclerView.post(() ->
+                    dataRecyclerView.smoothScrollToPosition(dataPoints.size() - 1));
+        }
     }
 
     private void stopDataTransfer() {
@@ -584,6 +592,7 @@ public class MTDataFragment extends Fragment {
         Log.d(TAG, "receivedData.size at stop: " + receivedData.size());
 
         isReceivingData = false;
+        mainHandler.removeCallbacks(dataTimeoutRunnable);
         progressIndicator.setVisibility(View.GONE);
         startButton.setEnabled(true);
         stopButton.setEnabled(false);
@@ -597,7 +606,6 @@ public class MTDataFragment extends Fragment {
             statusTextView.setText("Данные не получены");
         }
 
-        // Отправляем команду остановки если нужно
         if (bluetoothService != null && bluetoothService.isConnected()) {
             bluetoothService.sendCommand("Stop\r");
         }
@@ -609,14 +617,12 @@ public class MTDataFragment extends Fragment {
             Log.d(TAG, "receivedData.size(): " + receivedData.size());
             Log.d(TAG, "appendMode: " + appendMode);
 
-            // Выводим первые 10 значений
             StringBuilder firstVals = new StringBuilder("First 10 values: ");
             for (int i = 0; i < Math.min(10, receivedData.size()); i++) {
                 firstVals.append(receivedData.get(i)).append(" ");
             }
             Log.d(TAG, firstVals.toString());
 
-            // НОВОЕ: Выводим последние 10 значений
             StringBuilder lastVals = new StringBuilder("Last 10 values: ");
             int startIdx = Math.max(0, receivedData.size() - 10);
             for (int i = startIdx; i < receivedData.size(); i++) {
@@ -624,7 +630,6 @@ public class MTDataFragment extends Fragment {
             }
             Log.d(TAG, lastVals.toString());
 
-            // Конвертируем List<Double> в double[]
             double[] values = new double[receivedData.size()];
             for (int i = 0; i < receivedData.size(); i++) {
                 values[i] = receivedData.get(i);
@@ -634,7 +639,6 @@ public class MTDataFragment extends Fragment {
             Log.d(TAG, "Device name: " + deviceName);
             Log.d(TAG, "Device address: " + deviceAddress);
 
-            // Определяем время начала
             long startTime;
             if (appendMode) {
                 File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
@@ -642,7 +646,6 @@ public class MTDataFragment extends Fragment {
                 long lastTimestamp = getLastTimestamp(dataFile);
 
                 if (lastTimestamp > 0) {
-                    // Новые данные начинаются через 1 секунду после последней записи
                     startTime = lastTimestamp + 1000;
                     Log.d(TAG, "Append mode: starting from " + new Date(startTime));
                 } else {
@@ -654,7 +657,6 @@ public class MTDataFragment extends Fragment {
                 Log.d(TAG, "Overwrite mode: using dataStartTime " + new Date(startTime));
             }
 
-            // Используем helper для сохранения данных в совместимом формате
             MTDeviceDataHelper.saveMTData(requireContext(), deviceName, deviceAddress,
                     values, startTime, appendMode);
 
@@ -665,10 +667,8 @@ public class MTDataFragment extends Fragment {
                     "Данные сохранены (" + receivedData.size() + " точек)";
 
             Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
-
             statusTextView.setText(appendMode ? "Данные добавлены" : "Данные сохранены");
 
-            // Обновляем график
             MTDeviceActivity activity = (MTDeviceActivity) getActivity();
             if (activity != null) {
                 MTDeviceActivity.MTPagerAdapter adapter = activity.getPagerAdapter();
@@ -676,11 +676,10 @@ public class MTDataFragment extends Fragment {
                     adapter.getGraphFragment().loadAndDisplayGraph();
                 }
 
-                // Переключаемся на вкладку "График"
                 activity.runOnUiThread(() -> {
                     androidx.viewpager2.widget.ViewPager2 viewPager = activity.findViewById(R.id.view_pager);
                     if (viewPager != null) {
-                        viewPager.setCurrentItem(2, true); // Вкладка "График"
+                        viewPager.setCurrentItem(2, true);
                     }
                 });
             }
@@ -692,5 +691,4 @@ public class MTDataFragment extends Fragment {
                     Toast.LENGTH_LONG).show();
         }
     }
-
 }

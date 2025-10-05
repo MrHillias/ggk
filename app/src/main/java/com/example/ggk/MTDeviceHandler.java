@@ -21,8 +21,8 @@ public class MTDeviceHandler {
 
     // Константы
     private static final long COMMAND_TIMEOUT = 5000;
-    private static final long COMMAND_DELAY = 1000;
-    private static final long INITIAL_DELAY = 1000;
+    private static final long COMMAND_DELAY = 500;
+    private static final long INITIAL_DELAY = 500;
     private static final String COMMAND_TERMINATOR = "\r";
 
     // Список команд для опроса
