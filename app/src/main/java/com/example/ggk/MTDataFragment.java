@@ -430,14 +430,22 @@ public class MTDataFragment extends Fragment {
 
             dataBuffer.append(data);
 
+            // КРИТИЧНО: Убираем "End\r\n" из данных перед парсингом
+            String processedData = data;
+            int endIndex = processedData.indexOf("End");
+            if (endIndex != -1) {
+                processedData = processedData.substring(0, endIndex);
+                Log.d(TAG, "Found 'End' in data, trimmed from " + data.length() +
+                        " to " + processedData.length() + " chars");
+            }
+
             // Собираем байтовые значения
-            String[] lines = data.split("\\s+");
+            String[] lines = processedData.split("\\s+");
             List<Integer> byteValues = new ArrayList<>();
 
             for (String line : lines) {
                 line = line.trim();
-                // Пропускаем "Start" и "End"
-                if (line.equals("Start") || line.equals("End")) {
+                if (line.equals("Start") || line.isEmpty()) {
                     continue;
                 }
 
@@ -451,20 +459,33 @@ public class MTDataFragment extends Fragment {
 
             Log.d(TAG, "Extracted " + byteValues.size() + " byte values from this chunk");
 
+            // НОВОЕ: Логируем последние 20 байтов
+            if (byteValues.size() > 20) {
+                StringBuilder lastBytes = new StringBuilder("Last 20 bytes: ");
+                for (int i = byteValues.size() - 20; i < byteValues.size(); i++) {
+                    lastBytes.append(byteValues.get(i)).append(" ");
+                }
+                Log.d(TAG, lastBytes.toString());
+            }
+
             // Обрабатываем попарно как signed int16
             int beforeSize = receivedData.size();
             for (int i = 0; i < byteValues.size() - 1; i += 2) {
                 int lowByte = byteValues.get(i);
                 int highByte = byteValues.get(i + 1);
 
-                // Преобразуем в signed int16 (little-endian)
                 short signedValue = (short)((highByte << 8) | lowByte);
                 receivedData.add((double)signedValue);
 
-                // Логируем первые 5 значений
                 if (receivedData.size() <= 5) {
                     Log.d(TAG, String.format("Pair: [%3d, %3d] -> int16: %6d",
                             lowByte, highByte, signedValue));
+                }
+
+                // НОВОЕ: Логируем последние 10 пар
+                if (i >= byteValues.size() - 20 && i < byteValues.size() - 1) {
+                    Log.d(TAG, String.format("LAST Pair %d: [%3d, %3d] -> int16: %6d",
+                            i/2, lowByte, highByte, signedValue));
                 }
             }
 
@@ -474,16 +495,22 @@ public class MTDataFragment extends Fragment {
                 Log.d(TAG, "Total receivedData.size AFTER processing: " + receivedData.size());
             }
 
-            // Обновляем UI
             updateDataDisplay();
 
-            // Проверяем на окончание передачи (по "End")
             if (data.contains("End") || data.contains("END")) {
                 Log.d(TAG, "=== END SEQUENCE DETECTED ===");
                 Log.d(TAG, "Final receivedData.size: " + receivedData.size());
+
+                // НОВОЕ: Выводим последние 15 значений из receivedData
+                StringBuilder lastValues = new StringBuilder("Last 15 receivedData values: ");
+                int startIdx = Math.max(0, receivedData.size() - 15);
+                for (int i = startIdx; i < receivedData.size(); i++) {
+                    lastValues.append(receivedData.get(i)).append(" ");
+                }
+                Log.d(TAG, lastValues.toString());
+
                 stopDataTransfer();
 
-                // В автоматическом режиме сразу сохраняем
                 if (autoMode && !receivedData.isEmpty()) {
                     autoMode = false;
                     saveDataToFile();
@@ -576,14 +603,14 @@ public class MTDataFragment extends Fragment {
                 if (lastTimestamp > 0) {
                     // Новые данные начинаются через 1 секунду после последней записи
                     startTime = lastTimestamp + 1000;
-                    Log.d(TAG, "Append mode: starting from " + new java.util.Date(startTime));
+                    Log.d(TAG, "Append mode: starting from " + new Date(startTime));
                 } else {
                     startTime = dataStartTime;
                     Log.d(TAG, "Append mode: but no last timestamp found, using dataStartTime");
                 }
             } else {
                 startTime = dataStartTime;
-                Log.d(TAG, "Overwrite mode: using dataStartTime " + new java.util.Date(startTime));
+                Log.d(TAG, "Overwrite mode: using dataStartTime " + new Date(startTime));
             }
 
             // Используем helper для сохранения данных в совместимом формате
@@ -600,7 +627,7 @@ public class MTDataFragment extends Fragment {
 
             statusTextView.setText(appendMode ? "Данные добавлены" : "Данные сохранены");
 
-            // Обновляем график если он открыт
+            // Обновляем график
             MTDeviceActivity activity = (MTDeviceActivity) getActivity();
             if (activity != null) {
                 MTDeviceActivity.MTPagerAdapter adapter = activity.getPagerAdapter();
