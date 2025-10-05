@@ -110,39 +110,74 @@ public class MTDeviceDataHelper {
 
     /**
      * Сохраняет данные MT устройства в формате, совместимом с обычными устройствами
-     * БЕЗ создания info.txt
      */
-    public static void saveMTData(Context context, String deviceName,
-                                  double[] values, long startTime) throws IOException {
+    public static void saveMTData(Context context, String deviceName, String deviceAddress,
+                                  double[] values, long startTime, boolean appendMode) throws IOException {
         try {
+            Log.d(TAG, "=== saveMTData START ===");
+            Log.d(TAG, "Device name: " + deviceName);
+            Log.d(TAG, "Device address: " + deviceAddress);
+            Log.d(TAG, "Values count: " + values.length);
+            Log.d(TAG, "Start time: " + new Date(startTime));
+            Log.d(TAG, "Append mode: " + appendMode);
+
             File deviceFolder = new File(context.getFilesDir(), sanitizeFileName(deviceName));
             if (!deviceFolder.exists()) {
                 deviceFolder.mkdirs();
+                Log.d(TAG, "Created device folder: " + deviceFolder.getAbsolutePath());
             }
+
+            // ВАЖНО: Сохраняем MAC адрес устройства
+            DeviceInfoHelper.saveDeviceAddress(context, deviceName, deviceAddress);
+            Log.d(TAG, "Saved device address");
 
             // Создаем маркер MT устройства
             File mtMarkerFile = new File(deviceFolder, "mt_device");
             if (!mtMarkerFile.exists()) {
                 mtMarkerFile.createNewFile();
+                Log.d(TAG, "Created MT marker file");
             }
 
             // Сохраняем в стандартный файл data.txt для совместимости с графиком
             File dataFile = new File(deviceFolder, "data.txt");
-            SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
 
-            try (FileWriter writer = new FileWriter(dataFile, true)) { // Append mode
-                // Данные идут в обратном порядке (от новых к старым)
-                for (int i = values.length - 1; i >= 0; i--) {
-                    long timestamp = startTime - (i * 1000L); // Вычитаем секунды
-                    writer.write(String.format(Locale.US, "%.2f;%s\n",
-                            values[i], sdf.format(new Date(timestamp))));
-                }
+            // ВАЖНО: Проверяем существующий файл
+            if (dataFile.exists()) {
+                long existingSize = dataFile.length();
+                Log.d(TAG, "data.txt exists! Size: " + existingSize + " bytes, mode: " +
+                        (appendMode ? "APPEND" : "OVERWRITE"));
+            } else {
+                Log.d(TAG, "Creating new data.txt file");
             }
 
-            Log.d(TAG, "Saved " + values.length + " MT data points for " + deviceName);
+            SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+
+            try (FileWriter writer = new FileWriter(dataFile, appendMode)) {
+                Log.d(TAG, "Writing data to file (append mode: " + appendMode + ")");
+
+                // MT-устройства передают данные в правильном порядке (от старых к новым)
+                // Поэтому записываем их в прямом порядке
+                for (int i = 0; i < values.length; i++) {
+                    long timestamp = startTime + (i * 1000L); // Добавляем секунды
+                    String line = String.format(Locale.US, "%.2f;%s\n",
+                            values[i], sdf.format(new Date(timestamp)));
+                    writer.write(line);
+
+                    // Логируем первые 5 записей
+                    if (i < 5) {
+                        Log.d(TAG, "Writing line " + (i + 1) + ": " + line.trim());
+                    }
+                }
+                writer.flush();
+            }
+
+            Log.d(TAG, "Saved " + values.length + " MT data points");
+            Log.d(TAG, "Final file size: " + dataFile.length() + " bytes");
+            Log.d(TAG, "=== saveMTData END ===");
+
         } catch (IOException e) {
             Log.e(TAG, "Error saving MT data", e);
-            throw e; // Пробрасываем исключение для обработки в UI
+            throw e;
         }
     }
 }

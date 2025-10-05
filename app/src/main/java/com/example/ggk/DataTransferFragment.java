@@ -96,6 +96,9 @@ public class DataTransferFragment extends Fragment {
             isSyncMode = activity.isSyncMode();
             lastSyncTime = activity.getLastSyncTime();
         }
+
+        // Тестируем конвертацию
+        testByteConversion();
     }
 
     @Nullable
@@ -413,20 +416,96 @@ public class DataTransferFragment extends Fragment {
     private void parseNumericData(String data) {
         numericData.clear();
 
+        Log.d(TAG, "=== parseNumericData START ===");
+        Log.d(TAG, "Raw data length: " + data.length());
+        Log.d(TAG, "First 200 chars: " + data.substring(0, Math.min(200, data.length())));
+
         // Разбираем данные после Start
         String[] lines = data.split("\n");
+        List<Integer> byteValues = new ArrayList<>();
+
+        // Сначала собираем все байты
         for (String line : lines) {
             line = line.trim();
             if (!line.isEmpty()) {
-                // Извлекаем числа из строки
                 String[] parts = line.split("\\s+");
                 for (String part : parts) {
                     if (isNumeric(part)) {
-                        numericData.add(part);
+                        try {
+                            int byteValue = Integer.parseInt(part);
+                            byteValues.add(byteValue);
+                        } catch (NumberFormatException e) {
+                            // Игнорируем
+                        }
                     }
                 }
             }
         }
+
+        Log.d(TAG, "Total byte values collected: " + byteValues.size());
+
+        // Выводим первые 20 байтов для отладки
+        StringBuilder firstBytes = new StringBuilder("First 20 bytes: ");
+        for (int i = 0; i < Math.min(20, byteValues.size()); i++) {
+            firstBytes.append(byteValues.get(i)).append(" ");
+        }
+        Log.d(TAG, firstBytes.toString());
+
+        // Теперь обрабатываем попарно как signed int16 (little-endian)
+        Log.d(TAG, "=== Processing byte pairs ===");
+        for (int i = 0; i < byteValues.size() - 1; i += 2) {
+            int lowByte = byteValues.get(i);
+            int highByte = byteValues.get(i + 1);
+
+            // Преобразуем в signed int16 (little-endian)
+            short signedValue = (short)((highByte << 8) | lowByte);
+
+            numericData.add(String.valueOf(signedValue));
+
+            if (i < 10) { // Логируем первые 5 пар для отладки
+                Log.d(TAG, String.format("Pair %d: [%3d, %3d] -> binary [%s, %s] -> combined: %d -> signed int16: %d",
+                        i/2,
+                        lowByte, highByte,
+                        String.format("%8s", Integer.toBinaryString(lowByte & 0xFF)).replace(' ', '0'),
+                        String.format("%8s", Integer.toBinaryString(highByte & 0xFF)).replace(' ', '0'),
+                        (highByte << 8) | lowByte,
+                        signedValue));
+            }
+        }
+
+        Log.d(TAG, "Parsed " + numericData.size() + " signed int16 values from " + byteValues.size() + " bytes");
+
+        // Выводим первые 10 итоговых значений
+        StringBuilder firstValues = new StringBuilder("First 10 values: ");
+        for (int i = 0; i < Math.min(10, numericData.size()); i++) {
+            firstValues.append(numericData.get(i)).append(" ");
+        }
+        Log.d(TAG, firstValues.toString());
+        Log.d(TAG, "=== parseNumericData END ===");
+    }
+
+    private void testByteConversion() {
+        Log.d(TAG, "=== TESTING BYTE CONVERSION ===");
+
+        // Тестируем известные значения
+        int[][] testCases = {
+                {236, 255}, // Должно быть -20
+                {237, 255}, // Должно быть -19
+                {238, 255}  // Должно быть -18
+        };
+
+        for (int[] testCase : testCases) {
+            int lowByte = testCase[0];
+            int highByte = testCase[1];
+
+            short result = (short)((highByte << 8) | lowByte);
+
+            Log.d(TAG, String.format("Test: [%3d, %3d] -> %d (expected: %d)",
+                    lowByte, highByte, result,
+                    lowByte - 256)); // Примерное ожидаемое значение
+        }
+
+        Log.d(TAG, "=== END TEST ===");
     }
 
     private boolean isNumeric(String str) {

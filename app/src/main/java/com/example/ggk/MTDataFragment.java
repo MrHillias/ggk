@@ -52,6 +52,7 @@ public class MTDataFragment extends Fragment {
     private List<Double> receivedData = new ArrayList<>();
     private StringBuilder dataBuffer = new StringBuilder();
     private boolean isReceivingData = false;
+    private boolean appendMode = false;
     private long dataStartTime;
 
     @Override
@@ -271,6 +272,40 @@ public class MTDataFragment extends Fragment {
     }
     private void startDataTransfer() {
         Log.d(TAG, "=== startDataTransfer CALLED ===");
+
+        // Проверяем, есть ли уже сохраненные данные
+        File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+        File dataFile = new File(deviceFolder, "data.txt");
+
+        if (dataFile.exists() && dataFile.length() > 0) {
+            Log.d(TAG, "Found existing data file, size: " + dataFile.length());
+
+            // Считаем количество существующих точек
+            int existingPoints = countDataPoints(dataFile);
+
+            // Спрашиваем пользователя
+            new com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Данные уже существуют")
+                    .setMessage(String.format("Найдено %d точек данных. Что сделать?", existingPoints))
+                    .setPositiveButton("Перезаписать", (dialog, which) -> {
+                        Log.d(TAG, "User chose to overwrite existing data");
+                        appendMode = false;
+                        continueDataTransfer();
+                    })
+                    .setNeutralButton("Добавить", (dialog, which) -> {
+                        Log.d(TAG, "User chose to append to existing data");
+                        appendMode = true;
+                        continueDataTransfer();
+                    })
+                    .setNegativeButton("Отмена", null)
+                    .show();
+        } else {
+            appendMode = false;
+            continueDataTransfer();
+        }
+    }
+    private void continueDataTransfer() {
+        Log.d(TAG, "=== continueDataTransfer ===");
         Log.d(TAG, "autoMode: " + autoMode);
 
         // КРИТИЧНО: Создаем новый BluetoothService И устанавливаем callback ДО подключения
@@ -301,6 +336,61 @@ public class MTDataFragment extends Fragment {
         isReceivingData = true;
     }
 
+    private int countDataPoints(File dataFile) {
+        int count = 0;
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(dataFile))) {
+            while (reader.readLine() != null) {
+                count++;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error counting data points", e);
+        }
+        return count;
+    }
+
+    private long getLastTimestamp(File dataFile) {
+        String lastLine = null;
+        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(dataFile, "r")) {
+            long fileLength = file.length() - 1;
+            StringBuilder sb = new StringBuilder();
+
+            for (long filePointer = fileLength; filePointer != -1; filePointer--) {
+                file.seek(filePointer);
+                int readByte = file.readByte();
+
+                if (readByte == 0xA) { // LF
+                    if (filePointer < fileLength) {
+                        lastLine = sb.reverse().toString();
+                        break;
+                    }
+                } else if (readByte != 0xD) { // Ignore CR
+                    sb.append((char) readByte);
+                }
+            }
+
+            if (lastLine == null && sb.length() > 0) {
+                lastLine = sb.reverse().toString();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading last timestamp", e);
+            return 0;
+        }
+
+        if (lastLine != null && lastLine.contains(";")) {
+            String[] parts = lastLine.split(";");
+            if (parts.length >= 2) {
+                try {
+                    SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+                    Date date = sdf.parse(parts[1].trim());
+                    return date != null ? date.getTime() : 0;
+                } catch (Exception e) {
+                    Log.e(TAG, "Error parsing last timestamp", e);
+                }
+            }
+        }
+
+        return 0;
+    }
     private void sendDataCommand() {
         if (!bluetoothService.isConnected()) {
             statusTextView.setText("Не подключено");
@@ -335,10 +425,15 @@ public class MTDataFragment extends Fragment {
 
     private void processReceivedData(String data) {
         mainHandler.post(() -> {
+            Log.d(TAG, "=== processReceivedData ===");
+            Log.d(TAG, "Current receivedData.size BEFORE processing: " + receivedData.size());
+
             dataBuffer.append(data);
 
-            // Парсим числовые данные
+            // Собираем байтовые значения
             String[] lines = data.split("\\s+");
+            List<Integer> byteValues = new ArrayList<>();
+
             for (String line : lines) {
                 line = line.trim();
                 // Пропускаем "Start" и "End"
@@ -347,11 +442,36 @@ public class MTDataFragment extends Fragment {
                 }
 
                 try {
-                    double value = Double.parseDouble(line);
-                    receivedData.add(value);
+                    int value = Integer.parseInt(line);
+                    byteValues.add(value);
                 } catch (NumberFormatException e) {
                     // Игнорируем нечисловые данные
                 }
+            }
+
+            Log.d(TAG, "Extracted " + byteValues.size() + " byte values from this chunk");
+
+            // Обрабатываем попарно как signed int16
+            int beforeSize = receivedData.size();
+            for (int i = 0; i < byteValues.size() - 1; i += 2) {
+                int lowByte = byteValues.get(i);
+                int highByte = byteValues.get(i + 1);
+
+                // Преобразуем в signed int16 (little-endian)
+                short signedValue = (short)((highByte << 8) | lowByte);
+                receivedData.add((double)signedValue);
+
+                // Логируем первые 5 значений
+                if (receivedData.size() <= 5) {
+                    Log.d(TAG, String.format("Pair: [%3d, %3d] -> int16: %6d",
+                            lowByte, highByte, signedValue));
+                }
+            }
+
+            int addedCount = receivedData.size() - beforeSize;
+            if (addedCount > 0) {
+                Log.d(TAG, "Added " + addedCount + " values");
+                Log.d(TAG, "Total receivedData.size AFTER processing: " + receivedData.size());
             }
 
             // Обновляем UI
@@ -359,6 +479,8 @@ public class MTDataFragment extends Fragment {
 
             // Проверяем на окончание передачи (по "End")
             if (data.contains("End") || data.contains("END")) {
+                Log.d(TAG, "=== END SEQUENCE DETECTED ===");
+                Log.d(TAG, "Final receivedData.size: " + receivedData.size());
                 stopDataTransfer();
 
                 // В автоматическом режиме сразу сохраняем
@@ -390,6 +512,9 @@ public class MTDataFragment extends Fragment {
     }
 
     private void stopDataTransfer() {
+        Log.d(TAG, "=== stopDataTransfer ===");
+        Log.d(TAG, "receivedData.size at stop: " + receivedData.size());
+
         isReceivingData = false;
         progressIndicator.setVisibility(View.GONE);
         startButton.setEnabled(true);
@@ -412,20 +537,68 @@ public class MTDataFragment extends Fragment {
 
     private void saveDataToFile() {
         try {
+            Log.d(TAG, "=== SAVING DATA TO FILE ===");
+            Log.d(TAG, "receivedData.size(): " + receivedData.size());
+            Log.d(TAG, "appendMode: " + appendMode);
+
+            // Выводим первые 10 значений
+            StringBuilder firstVals = new StringBuilder("First 10 values: ");
+            for (int i = 0; i < Math.min(10, receivedData.size()); i++) {
+                firstVals.append(receivedData.get(i)).append(" ");
+            }
+            Log.d(TAG, firstVals.toString());
+
+            // НОВОЕ: Выводим последние 10 значений
+            StringBuilder lastVals = new StringBuilder("Last 10 values: ");
+            int startIdx = Math.max(0, receivedData.size() - 10);
+            for (int i = startIdx; i < receivedData.size(); i++) {
+                lastVals.append(receivedData.get(i)).append(" ");
+            }
+            Log.d(TAG, lastVals.toString());
+
             // Конвертируем List<Double> в double[]
             double[] values = new double[receivedData.size()];
             for (int i = 0; i < receivedData.size(); i++) {
                 values[i] = receivedData.get(i);
             }
 
+            Log.d(TAG, "Converted to array, length: " + values.length);
+            Log.d(TAG, "Device name: " + deviceName);
+            Log.d(TAG, "Device address: " + deviceAddress);
+
+            // Определяем время начала
+            long startTime;
+            if (appendMode) {
+                File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
+                File dataFile = new File(deviceFolder, "data.txt");
+                long lastTimestamp = getLastTimestamp(dataFile);
+
+                if (lastTimestamp > 0) {
+                    // Новые данные начинаются через 1 секунду после последней записи
+                    startTime = lastTimestamp + 1000;
+                    Log.d(TAG, "Append mode: starting from " + new java.util.Date(startTime));
+                } else {
+                    startTime = dataStartTime;
+                    Log.d(TAG, "Append mode: but no last timestamp found, using dataStartTime");
+                }
+            } else {
+                startTime = dataStartTime;
+                Log.d(TAG, "Overwrite mode: using dataStartTime " + new java.util.Date(startTime));
+            }
+
             // Используем helper для сохранения данных в совместимом формате
-            MTDeviceDataHelper.saveMTData(requireContext(), deviceName, values, dataStartTime);
+            MTDeviceDataHelper.saveMTData(requireContext(), deviceName, deviceAddress,
+                    values, startTime, appendMode);
 
-            Toast.makeText(getContext(),
-                    "Данные сохранены (" + receivedData.size() + " точек)",
-                    Toast.LENGTH_LONG).show();
+            Log.d(TAG, "Data saved successfully");
 
-            statusTextView.setText("Данные сохранены");
+            String message = appendMode ?
+                    "Добавлено " + receivedData.size() + " точек" :
+                    "Данные сохранены (" + receivedData.size() + " точек)";
+
+            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+
+            statusTextView.setText(appendMode ? "Данные добавлены" : "Данные сохранены");
 
             // Обновляем график если он открыт
             MTDeviceActivity activity = (MTDeviceActivity) getActivity();

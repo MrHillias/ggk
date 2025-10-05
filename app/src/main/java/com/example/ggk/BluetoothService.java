@@ -301,7 +301,7 @@ public class BluetoothService {
                             result.append("\n");
 
                             if (callback != null) {
-                                mainHandler.post(() -> callback.onError("AUTO: Switched to numeric mode after 'Start' + newline"));
+                                mainHandler.post(() -> callback.onError("AUTO: Switched to numeric mode (paired bytes)"));
                             }
 
                             sequenceBuffer.setLength(0);
@@ -336,22 +336,21 @@ public class BluetoothService {
                     result.append(".");
                 }
             } else {
+                // НОВАЯ ЛОГИКА: Обрабатываем пары байтов
                 numericBuffer.add(value);
 
-                if (numericBuffer.size() > 10) {
-                    numericBuffer.remove(0);
-                }
-
+                // Проверяем на последовательность End\r\n (5 байтов)
                 if (numericBuffer.size() >= 5) {
                     int size = numericBuffer.size();
-                    if (numericBuffer.get(size - 5) == 69 &&
-                            numericBuffer.get(size - 4) == 110 &&
-                            numericBuffer.get(size - 3) == 100 &&
-                            numericBuffer.get(size - 2) == 13 &&
-                            numericBuffer.get(size - 1) == 10) {
+                    if (numericBuffer.get(size - 5) == 69 &&  // 'E'
+                            numericBuffer.get(size - 4) == 110 &&  // 'n'
+                            numericBuffer.get(size - 3) == 100 &&  // 'd'
+                            numericBuffer.get(size - 2) == 13 &&   // '\r'
+                            numericBuffer.get(size - 1) == 10) {   // '\n'
 
                         Log.d(TAG, "Found 'End\\r\\n' sequence in numeric mode");
 
+                        // Убираем последние 5 байтов (End\r\n) из результата
                         String currentResult = result.toString();
                         String[] parts = currentResult.trim().split("\\s+");
 
@@ -376,6 +375,7 @@ public class BluetoothService {
                     }
                 }
 
+                // Просто добавляем байт (парная обработка будет при парсинге)
                 result.append(value).append(" ");
             }
         }

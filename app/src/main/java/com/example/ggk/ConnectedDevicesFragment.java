@@ -85,7 +85,7 @@ public class ConnectedDevicesFragment extends Fragment {
                     String address = device.getAddress();
                     String name = device.getName();
 
-                    Log.d(TAG, "Found device: " + name + " (" + address + ")");
+                    Log.d(TAG, "ACTION_FOUND: " + name + " (" + address + ")");
 
                     // Добавляем в список доступных устройств
                     availableDeviceAddresses.add(address);
@@ -93,41 +93,24 @@ public class ConnectedDevicesFragment extends Fragment {
                     // Сохраняем имя устройства
                     if (name != null && !name.isEmpty()) {
                         deviceNameMap.put(address, name);
+                        Log.d(TAG, "  Saved device name: " + name);
                     }
 
-                    // Логируем для отладки
-                    Log.d(TAG, "Available devices count: " + availableDeviceAddresses.size());
-                    for (DeviceInfo savedDevice : allDevices) {
-                        String normalizedSaved = normalizeMacAddress(savedDevice.address);
-                        String normalizedFound = normalizeMacAddress(address);
-                        if (normalizedSaved.equals(normalizedFound)) {
-                            Log.d(TAG, "MATCH FOUND! Device: " + savedDevice.getDisplayName() +
-                                    " Saved MAC: " + savedDevice.address + " Found MAC: " + address);
-                        }
-                    }
-
-                    // Обновляем UI
+                    // Сразу обновляем UI
                     updateDeviceAvailability();
                 }
             } else if (BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)) {
                 isScanning = true;
                 showScanIndicator(true);
-                Log.d(TAG, "Scan started");
+                Log.d(TAG, "ACTION_DISCOVERY_STARTED");
             } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
                 isScanning = false;
                 showScanIndicator(false);
-                Log.d(TAG, "Scan finished. Found devices: " + availableDeviceAddresses.size());
+                Log.d(TAG, "ACTION_DISCOVERY_FINISHED");
+                Log.d(TAG, "Total found devices: " + availableDeviceAddresses.size());
 
-                // Выводим все найденные устройства
-                for (String mac : availableDeviceAddresses) {
-                    Log.d(TAG, "Available device MAC: " + mac);
-                }
-
-                // Выводим все сохраненные устройства
-                for (DeviceInfo device : allDevices) {
-                    Log.d(TAG, "Saved device: " + device.getDisplayName() +
-                            " MAC: " + device.address + " Available: " + device.isAvailable);
-                }
+                // Финальное обновление UI
+                updateDeviceAvailability();
             }
         }
     };
@@ -310,18 +293,27 @@ public class ConnectedDevicesFragment extends Fragment {
             return;
         }
 
+        Log.d(TAG, "=== STARTING BLUETOOTH SCAN ===");
+
         // Очищаем список доступных устройств перед новым сканированием
         availableDeviceAddresses.clear();
+        deviceNameMap.clear();
 
         // Сначала добавляем все сопряженные устройства как доступные
         try {
             Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+            Log.d(TAG, "Found " + pairedDevices.size() + " paired devices:");
+
             for (BluetoothDevice device : pairedDevices) {
-                availableDeviceAddresses.add(device.getAddress());
-                if (device.getName() != null) {
-                    deviceNameMap.put(device.getAddress(), device.getName());
+                String address = device.getAddress();
+                String name = device.getName();
+
+                availableDeviceAddresses.add(address);
+                if (name != null) {
+                    deviceNameMap.put(address, name);
                 }
-                Log.d(TAG, "Added paired device: " + device.getName() + " (" + device.getAddress() + ")");
+
+                Log.d(TAG, "  Paired: " + name + " | MAC: " + address);
             }
         } catch (Exception e) {
             Log.e(TAG, "Error getting paired devices", e);
@@ -335,7 +327,7 @@ public class ConnectedDevicesFragment extends Fragment {
         // Начинаем новое сканирование
         isScanning = true;
         boolean started = bluetoothAdapter.startDiscovery();
-        Log.d(TAG, "Bluetooth scan started: " + started);
+        Log.d(TAG, "Discovery started: " + started);
 
         // Сразу обновляем доступность для сопряженных устройств
         updateDeviceAvailability();
@@ -343,49 +335,67 @@ public class ConnectedDevicesFragment extends Fragment {
         // Автоматически останавливаем сканирование через SCAN_DURATION
         scanHandler.postDelayed(() -> {
             if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
+                Log.d(TAG, "Stopping discovery after timeout");
                 bluetoothAdapter.cancelDiscovery();
             }
         }, SCAN_DURATION);
     }
 
     private void updateDeviceAvailability() {
-        // Обновляем статус доступности для всех устройств
-        boolean hasChanges = false;
+        Log.d(TAG, "=== updateDeviceAvailability START ===");
+        Log.d(TAG, "Available addresses count: " + availableDeviceAddresses.size());
 
         // Создаем нормализованный набор доступных MAC адресов
         Set<String> normalizedAvailableAddresses = new HashSet<>();
-        for (String mac : availableDeviceAddresses) {
-            normalizedAvailableAddresses.add(normalizeMacAddress(mac));
-        }
+        Map<String, String> normalizedToOriginal = new HashMap<>();
 
+        // ВАЖНО: Сначала выводим ВСЕ найденные устройства
+        Log.d(TAG, "--- All available devices: ---");
+        for (String mac : availableDeviceAddresses) {
+            String normalized = normalizeMacAddress(mac);
+            normalizedAvailableAddresses.add(normalized);
+            normalizedToOriginal.put(normalized, mac);
+
+            String deviceName = deviceNameMap.get(mac);
+            Log.d(TAG, "  Available: " + (deviceName != null ? deviceName : "Unknown") +
+                    " | MAC: " + mac + " | Normalized: " + normalized);
+        }
+        Log.d(TAG, "------------------------------");
+
+        boolean hasChanges = false;
+
+        // Теперь проверяем каждое сохраненное устройство
+        Log.d(TAG, "--- Checking saved devices: ---");
         for (DeviceInfo device : allDevices) {
             boolean wasAvailable = device.isAvailable;
-
-            // Нормализуем MAC адрес устройства для сравнения
             String normalizedDeviceMac = normalizeMacAddress(device.address);
+
+            Log.d(TAG, "Checking: " + device.getDisplayName());
+            Log.d(TAG, "  Saved MAC: " + device.address + " | Normalized: " + normalizedDeviceMac);
+
             device.isAvailable = normalizedAvailableAddresses.contains(normalizedDeviceMac);
 
-            // Если устройство стало доступным, обновляем его имя из Bluetooth
             if (device.isAvailable) {
-                // Ищем оригинальный MAC адрес в deviceNameMap
-                for (String mac : availableDeviceAddresses) {
-                    if (normalizeMacAddress(mac).equals(normalizedDeviceMac) &&
-                            deviceNameMap.containsKey(mac)) {
-                        device.bluetoothName = deviceNameMap.get(mac);
-                        break;
-                    }
+                String originalMac = normalizedToOriginal.get(normalizedDeviceMac);
+                if (originalMac != null && deviceNameMap.containsKey(originalMac)) {
+                    device.bluetoothName = deviceNameMap.get(originalMac);
+                    Log.d(TAG, "  ✓ AVAILABLE | Bluetooth name: " + device.bluetoothName);
+                } else {
+                    Log.d(TAG, "  ✓ AVAILABLE (no name update)");
                 }
+            } else {
+                Log.d(TAG, "  ✗ NOT AVAILABLE");
+                Log.d(TAG, "  Normalized MAC not found in available list");
             }
 
-            // Логируем изменения статуса
             if (wasAvailable != device.isAvailable) {
-                Log.d(TAG, "Device " + device.getDisplayName() + " (" + device.address +
-                        ") availability changed to: " + device.isAvailable);
+                Log.d(TAG, "  >>> STATUS CHANGED: " + wasAvailable + " -> " + device.isAvailable);
                 hasChanges = true;
             }
         }
+        Log.d(TAG, "------------------------------");
+        Log.d(TAG, "=== updateDeviceAvailability END (hasChanges: " + hasChanges + ") ===");
 
-        // Обновляем UI только если были изменения
         if (hasChanges || filteredDevices.isEmpty()) {
             filterDevices();
         }
@@ -482,9 +492,22 @@ public class ConnectedDevicesFragment extends Fragment {
     }
 
     private boolean hasRequiredFiles(File folder) {
-        File infoFile = new File(folder, "info.txt");
+        File mtMarker = new File(folder, "mt_device");
         File dataFile = new File(folder, "data.txt");
-        return infoFile.exists() && dataFile.exists();
+
+        // Для MT-устройств достаточно маркера и data.txt
+        if (mtMarker.exists() && dataFile.exists()) {
+            Log.d(TAG, "Found MT device folder: " + folder.getName());
+            return true;
+        }
+
+        // Для обычных устройств нужны info.txt и data.txt
+        File infoFile = new File(folder, "info.txt");
+        boolean hasNormalFiles = infoFile.exists() && dataFile.exists();
+        if (hasNormalFiles) {
+            Log.d(TAG, "Found normal device folder: " + folder.getName());
+        }
+        return hasNormalFiles;
     }
 
     private String loadCustomName(File folder) {
@@ -631,9 +654,11 @@ public class ConnectedDevicesFragment extends Fragment {
     }
 
     private String normalizeMacAddress(String mac) {
-        if (mac == null) return "";
-        // Убираем все разделители и приводим к верхнему регистру
-        return mac.replaceAll("[:-]", "").toUpperCase();
+        if (mac == null || mac.isEmpty()) return "";
+        // Убираем все разделители и пробелы, приводим к верхнему регистру
+        String normalized = mac.replaceAll("[:\\-\\s]", "").toUpperCase().trim();
+        Log.d(TAG, "Normalized MAC: " + mac + " -> " + normalized);
+        return normalized;
     }
 
     private void showRenameDialog(DeviceInfo device) {
