@@ -1,12 +1,17 @@
 package com.example.ggk;
 
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -58,6 +63,8 @@ public class MTDataFragment extends Fragment {
     private boolean isReceivingData = false;
     private boolean appendMode = false;
     private long dataStartTime;
+    private int pendingDelayValue = 0;
+    private boolean waitingToSendCommands = false;
     private long lastDataReceivedTime = 0;
 
     @Override
@@ -194,7 +201,14 @@ public class MTDataFragment extends Fragment {
             getActivity().runOnUiThread(() -> {
                 Log.d(TAG, "onServicesDiscovered callback: success=" + success);
                 if (success) {
-                    Log.d(TAG, "Services ready, sending SendData command...");
+                    Log.d(TAG, "Services ready, enabling numeric mode...");
+
+                    // КРИТИЧНО: Включаем numeric mode ДЛЯ получения сырых байтов
+                    if (bluetoothService != null) {
+                        bluetoothService.forceNumericMode(true);
+                        Log.d(TAG, "✓ Numeric mode forced ON");
+                    }
+
                     statusTextView.setText("Готово, отправка команды...");
 
                     mainHandler.postDelayed(() -> {
@@ -292,6 +306,7 @@ public class MTDataFragment extends Fragment {
     }
 
     private void startDataTransfer() {
+        /*
         Log.d(TAG, "=== startDataTransfer CALLED ===");
 
         File deviceFolder = new File(requireContext().getFilesDir(), sanitizeFileName(deviceName));
@@ -321,6 +336,136 @@ public class MTDataFragment extends Fragment {
             appendMode = false;
             continueDataTransfer();
         }
+        */
+        showDelayInputDialog();
+    }
+
+    /**
+     * Показывает диалог для ввода задержки перед получением данных
+     */
+    private void showDelayInputDialog() {
+        // Создаем диалог с полем ввода
+        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+        builder.setTitle("Задержка перед получением данных");
+
+        // Создаем EditText для ввода числа
+        final EditText input = new EditText(requireContext());
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setHint("Введите задержку (мс)");
+        input.setText("1000"); // Значение по умолчанию 1000 мс
+
+        // Добавляем отступы вокруг поля ввода
+        LinearLayout container = new LinearLayout(requireContext());
+        container.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(50, 20, 50, 20);
+        input.setLayoutParams(params);
+        container.addView(input);
+
+        builder.setView(container);
+
+        // Кнопка OK
+        builder.setPositiveButton("OK", (dialog, which) -> {
+            String delayStr = input.getText().toString().trim();
+
+            if (delayStr.isEmpty()) {
+                Toast.makeText(requireContext(), "Введите значение задержки", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            try {
+                int delayValue = Integer.parseInt(delayStr);
+
+                if (delayValue < 0) {
+                    Toast.makeText(requireContext(), "Задержка не может быть отрицательной", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                // ВАЖНО: Сначала подключаемся к устройству, потом отправляем команды
+                connectAndSendCommands(delayValue);
+
+            } catch (NumberFormatException e) {
+                Toast.makeText(requireContext(), "Неверный формат числа", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Кнопка Отмена
+        builder.setNegativeButton("Отмена", (dialog, which) -> dialog.cancel());
+
+        AlertDialog dialog = builder.create();
+        dialog.show();
+
+        // Автоматически показываем клавиатуру
+        input.requestFocus();
+        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+    }
+
+    /**
+     * Подключается к устройству и отправляет команды
+     */
+    private void connectAndSendCommands(int delayValue) {
+        isReceivingData = true;
+        dataStartTime = System.currentTimeMillis();
+        statusTextView.setText("Подключение к устройству...");
+        startButton.setEnabled(false);
+        stopButton.setEnabled(true);
+        progressIndicator.setVisibility(View.VISIBLE);
+
+        // Сохраняем значение задержки для использования после подключения
+        this.pendingDelayValue = delayValue;
+        this.waitingToSendCommands = true;
+
+        Log.d(TAG, "Connecting to device for sending commands...");
+
+        // Подключаемся к устройству для записи команд (WRITE_UUID)
+        if (bluetoothService != null) {
+            bluetoothService.connect(deviceAddress, SERVICE_UUID, WRITE_UUID);
+        } else {
+            Log.e(TAG, "BluetoothService is null!");
+            statusTextView.setText("Ошибка: сервис Bluetooth недоступен");
+            resetState();
+        }
+    }
+
+    /**
+     * Отправляет команду Delay, ждет 100мс, затем отправляет SendData
+     * Вызывается после успешного подключения
+     */
+    private void sendDelayAndDataCommands(int delayValue) {
+        statusTextView.setText("Установка задержки...");
+
+        // Шаг 1: Отправляем команду Delay
+        String delayCommand = "Delay " + delayValue + "\r";
+        Log.d(TAG, "Sending delay command: " + delayCommand);
+
+        boolean delaySent = bluetoothService.sendCommand(delayCommand);
+
+        if (!delaySent) {
+            Log.e(TAG, "Failed to send Delay command");
+            statusTextView.setText("Ошибка отправки команды Delay");
+            resetState();
+            return;
+        }
+
+        Log.d(TAG, "Delay command sent successfully, waiting 100ms...");
+        statusTextView.setText("Задержка установлена, запрос данных...");
+
+        // Шаг 2: Ждем 100мс и отправляем SendData
+        mainHandler.postDelayed(() -> {
+            Log.d(TAG, "Sending SendData command...");
+            sendDataCommand();
+        }, 100); // 100 миллисекунд
+    }
+
+    private void resetState() {
+        isReceivingData = false;
+        waitingToSendCommands = false;
+        startButton.setEnabled(true);
+        stopButton.setEnabled(false);
+        progressIndicator.setVisibility(View.GONE);
     }
 
     private void continueDataTransfer() {
@@ -347,7 +492,6 @@ public class MTDataFragment extends Fragment {
         progressIndicator.setVisibility(View.VISIBLE);
         startButton.setEnabled(false);
 
-        bluetoothService.setRawTextMode(false);
         Log.d(TAG, "Connecting to device...");
         bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
 
@@ -411,6 +555,7 @@ public class MTDataFragment extends Fragment {
     }
 
     private void sendDataCommand() {
+        /*
         if (!bluetoothService.isConnected()) {
             statusTextView.setText("Не подключено");
             return;
@@ -439,6 +584,45 @@ public class MTDataFragment extends Fragment {
             isReceivingData = false;
             progressIndicator.setVisibility(View.GONE);
             startButton.setEnabled(true);
+        }
+
+         */
+        statusTextView.setText("Запрос данных...");
+
+        // Отправляем команду "SendData" для MT устройств
+        boolean sent = bluetoothService.sendCommand("SendData\r");
+
+        if (sent) {
+            Log.d(TAG, "SendData command sent successfully");
+            statusTextView.setText("Ожидание ответа устройства...");
+
+            // Ждем перед отключением
+            mainHandler.postDelayed(() -> {
+                Log.d(TAG, "Disconnecting write service, switching to read mode...");
+                statusTextView.setText("Переключение на режим чтения...");
+
+                if (bluetoothService != null) {
+                    bluetoothService.disconnect();
+                }
+
+                // Ждем полного отключения перед переподключением
+                mainHandler.postDelayed(() -> {
+                    Log.d(TAG, "Connecting in read mode...");
+                    statusTextView.setText("Получение данных...");
+
+                    // Включаем парсинг Start/End для MT
+                    if (bluetoothService != null) {
+                        bluetoothService.setRawTextMode(false); // false = парсить Start/End
+                        bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
+                    }
+                }, 1000); // 1 секунда на полное отключение
+
+            }, 2000); // 2 секунды ждем после SendData
+
+        } else {
+            Log.e(TAG, "Failed to send SendData command");
+            statusTextView.setText("Ошибка отправки команды");
+            resetState();
         }
     }
 
