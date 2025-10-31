@@ -140,11 +140,47 @@ public class MTDataFragment extends Fragment {
 
             @Override
             public void onServicesDiscovered(boolean success) {
-                if (!success) {
-                    mainHandler.post(() -> {
+                Log.d(TAG, "=== CALLBACK: onServicesDiscovered: " + success + " ===");
+                if (getActivity() == null) return;
+                getActivity().runOnUiThread(() -> {
+                    Log.d(TAG, "onServicesDiscovered callback: success=" + success);
+                    if (success) {
+                        Log.d(TAG, "Services ready");
+
+                        // ✅ КРИТИЧНО: Проверяем, ждем ли мы отправки команд
+                        if (waitingToSendCommands) {
+                            Log.d(TAG, "waitingToSendCommands=true, preparing to send commands");
+                            waitingToSendCommands = false;
+
+                            statusTextView.setText("Отправка команд...");
+
+                            // Ждем немного для стабилизации соединения
+                            mainHandler.postDelayed(() -> {
+                                Log.d(TAG, "Sending commands with delay value: " + pendingDelayValue);
+                                sendDelayAndDataCommands(pendingDelayValue);
+                            }, 500);
+                        } else {
+                            // Старая логика для обычного режима
+                            Log.d(TAG, "Normal mode - enabling numeric mode and sending data");
+
+                            if (bluetoothService != null) {
+                                bluetoothService.forceNumericMode(true);
+                                Log.d(TAG, "✓ Numeric mode forced ON");
+                            }
+
+                            statusTextView.setText("Готово, отправка команды...");
+
+                            mainHandler.postDelayed(() -> {
+                                sendDataCommand();
+                            }, 500);
+                        }
+                    } else {
                         statusTextView.setText("Ошибка обнаружения сервисов");
-                    });
-                }
+                        progressIndicator.setVisibility(View.GONE);
+                        startButton.setEnabled(true);
+                        isReceivingData = false;
+                    }
+                });
             }
 
             @Override
@@ -414,15 +450,19 @@ public class MTDataFragment extends Fragment {
         stopButton.setEnabled(true);
         progressIndicator.setVisibility(View.VISIBLE);
 
-        // Сохраняем значение задержки для использования после подключения
         this.pendingDelayValue = delayValue;
         this.waitingToSendCommands = true;
 
         Log.d(TAG, "Connecting to device for sending commands...");
 
-        // Подключаемся к устройству для записи команд (WRITE_UUID)
+        // ✅ ИСПРАВЛЕНО: используем connectForMTDevice вместо connectForCommands
         if (bluetoothService != null) {
-            bluetoothService.connect(deviceAddress, SERVICE_UUID, WRITE_UUID);
+            bluetoothService.connectForMTDevice(
+                    deviceAddress,
+                    SERVICE_UUID,
+                    READ_UUID,   // ← для чтения данных
+                    WRITE_UUID   // ← для записи команд
+            );
         } else {
             Log.e(TAG, "BluetoothService is null!");
             statusTextView.setText("Ошибка: сервис Bluetooth недоступен");
@@ -437,7 +477,12 @@ public class MTDataFragment extends Fragment {
     private void sendDelayAndDataCommands(int delayValue) {
         statusTextView.setText("Установка задержки...");
 
-        // Шаг 1: Отправляем команду Delay
+        // ✅ ВАЖНО: Включаем numeric mode для получения байтов
+        if (bluetoothService != null) {
+            bluetoothService.forceNumericMode(true);
+            Log.d(TAG, "✓ Numeric mode enabled");
+        }
+
         String delayCommand = "Delay " + delayValue + "\r";
         Log.d(TAG, "Sending delay command: " + delayCommand);
 
@@ -453,11 +498,19 @@ public class MTDataFragment extends Fragment {
         Log.d(TAG, "Delay command sent successfully, waiting 100ms...");
         statusTextView.setText("Задержка установлена, запрос данных...");
 
-        // Шаг 2: Ждем 100мс и отправляем SendData
         mainHandler.postDelayed(() -> {
             Log.d(TAG, "Sending SendData command...");
-            sendDataCommand();
-        }, 100); // 100 миллисекунд
+
+            boolean sent = bluetoothService.sendCommand("SendData\r");
+
+            if (sent) {
+                Log.d(TAG, "SendData sent, waiting for data...");
+                statusTextView.setText("Получение данных...");
+            } else {
+                Log.e(TAG, "Failed to send SendData");
+                resetState();
+            }
+        }, 100);
     }
 
     private void resetState() {
@@ -594,30 +647,10 @@ public class MTDataFragment extends Fragment {
 
         if (sent) {
             Log.d(TAG, "SendData command sent successfully");
-            statusTextView.setText("Ожидание ответа устройства...");
+            statusTextView.setText("Получение данных...");
 
-            // Ждем перед отключением
-            mainHandler.postDelayed(() -> {
-                Log.d(TAG, "Disconnecting write service, switching to read mode...");
-                statusTextView.setText("Переключение на режим чтения...");
-
-                if (bluetoothService != null) {
-                    bluetoothService.disconnect();
-                }
-
-                // Ждем полного отключения перед переподключением
-                mainHandler.postDelayed(() -> {
-                    Log.d(TAG, "Connecting in read mode...");
-                    statusTextView.setText("Получение данных...");
-
-                    // Включаем парсинг Start/End для MT
-                    if (bluetoothService != null) {
-                        bluetoothService.setRawTextMode(false); // false = парсить Start/End
-                        bluetoothService.connect(deviceAddress, SERVICE_UUID, READ_UUID);
-                    }
-                }, 1000); // 1 секунда на полное отключение
-
-            }, 2000); // 2 секунды ждем после SendData
+            // ✅ ВСЁ! Просто ждем данные на этом же соединении
+            // Не нужно отключаться и переподключаться
 
         } else {
             Log.e(TAG, "Failed to send SendData command");
