@@ -127,7 +127,7 @@ public class MTDeviceActivity extends AppCompatActivity {
 
         @Override
         public int getItemCount() {
-            return 3; // Теперь 3 вкладки вместо 4
+            return 3;
         }
 
         public MTDeviceInfoFragment getInfoFragment() {
@@ -143,6 +143,7 @@ public class MTDeviceActivity extends AppCompatActivity {
         }
     }
 
+    // Флаг для автоматического запуска скачивания данных
     private boolean shouldAutoStartDataDownload = false;
 
     public boolean shouldAutoStartDataDownload() {

@@ -10,6 +10,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
@@ -48,7 +49,7 @@ public class MTDataFragment extends Fragment {
     private MaterialButton clearButton;
     private RecyclerView dataRecyclerView;
     private View emptyState;
-    private MTDataAdapter dataAdapter;
+    private MTPacketAdapter packetAdapter;
 
     private BluetoothService bluetoothService;
     private Handler mainHandler;
@@ -95,11 +96,10 @@ public class MTDataFragment extends Fragment {
     }
 
     private void setupRecyclerView() {
-        dataAdapter = new MTDataAdapter();
-        dataRecyclerView.setAdapter(dataAdapter);
+        packetAdapter = new MTPacketAdapter();
+        dataRecyclerView.setAdapter(packetAdapter);
         dataRecyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
 
-        // Показываем пустое состояние по умолчанию
         updateEmptyState();
     }
 
@@ -244,7 +244,7 @@ public class MTDataFragment extends Fragment {
     private void clearData() {
         receivedData.clear();
         dataBuffer.setLength(0);
-        dataAdapter.submitList(new ArrayList<>());
+        packetAdapter.submitList(new ArrayList<>());
         updateEmptyState();
         dataCountTextView.setText("Получено точек: 0");
         statusTextView.setText("Данные очищены");
@@ -255,7 +255,7 @@ public class MTDataFragment extends Fragment {
     }
 
     private void updateEmptyState() {
-        boolean isEmpty = receivedData.isEmpty();
+        boolean isEmpty = (packetAdapter.getItemCount() == 0);
         emptyState.setVisibility(isEmpty ? View.VISIBLE : View.GONE);
         dataRecyclerView.setVisibility(isEmpty ? View.GONE : View.VISIBLE);
     }
@@ -339,7 +339,7 @@ public class MTDataFragment extends Fragment {
 
         receivedData.clear();
         dataBuffer.setLength(0);
-        dataAdapter.submitList(new ArrayList<>());
+        packetAdapter.submitList(new ArrayList<>());
         updateEmptyState();
         lastDataReceivedTime = 0;
 
@@ -567,24 +567,67 @@ public class MTDataFragment extends Fragment {
     private void updateDataDisplay() {
         dataCountTextView.setText(String.format("Получено точек: %d", receivedData.size()));
 
-        // Создаем список точек данных с метками времени
-        List<MTDataAdapter.DataPoint> dataPoints = new ArrayList<>();
-
-        for (int i = 0; i < receivedData.size(); i++) {
-            // Вычисляем временную метку для каждой точки (1 секунда = 1 точка)
-            long timestamp = dataStartTime + (i * 1000L);
-            dataPoints.add(new MTDataAdapter.DataPoint(i, receivedData.get(i), timestamp));
-        }
+        // Разбиваем данные на пакеты
+        List<MTPacketAdapter.PacketData> packets = parsePackets(receivedData);
 
         // Обновляем адаптер
-        dataAdapter.submitList(dataPoints);
+        packetAdapter.submitList(packets);
         updateEmptyState();
 
         // Автопрокрутка к последнему элементу
-        if (!dataPoints.isEmpty()) {
+        if (!packets.isEmpty()) {
             dataRecyclerView.post(() ->
-                    dataRecyclerView.smoothScrollToPosition(dataPoints.size() - 1));
+                    dataRecyclerView.smoothScrollToPosition(packets.size() - 1));
         }
+    }
+
+    private List<MTPacketAdapter.PacketData> parsePackets(List<Double> data) {
+        List<MTPacketAdapter.PacketData> packets = new ArrayList<>();
+
+        final int PACKET_SIZE = 133; // 132 значения + 1 контрольная сумма
+
+        int packetNumber = 1;
+        for (int i = 0; i < data.size(); i += PACKET_SIZE) {
+            // Проверяем, хватает ли данных для полного пакета
+            if (i + PACKET_SIZE > data.size()) {
+                Log.w(TAG, "Incomplete packet at position " + i +
+                        ", remaining values: " + (data.size() - i));
+                break;
+            }
+
+            // Извлекаем значения пакета (первые 132 элемента)
+            List<Integer> packetValues = new ArrayList<>();
+            for (int j = i; j < i + 132; j++) {
+                packetValues.add(data.get(j).intValue());
+            }
+
+            // Последний элемент - контрольная сумма
+            int receivedChecksum = data.get(i + 132).intValue();
+
+            // Создаем пакет
+            MTPacketAdapter.PacketData packet = new MTPacketAdapter.PacketData(
+                    packetNumber,
+                    packetValues,
+                    receivedChecksum
+            );
+
+            packets.add(packet);
+
+            // Логируем информацию о пакете
+            if (packet.isChecksumValid()) {
+                Log.d(TAG, String.format("Packet #%d: checksum OK (%d)",
+                        packetNumber, receivedChecksum));
+            } else {
+                Log.w(TAG, String.format("Packet #%d: checksum ERROR! Received: %d, Calculated: %d",
+                        packetNumber, receivedChecksum, packet.calculatedChecksum));
+            }
+
+            packetNumber++;
+        }
+
+        Log.d(TAG, "Parsed " + packets.size() + " packets from " + data.size() + " values");
+
+        return packets;
     }
 
     private void stopDataTransfer() {
@@ -612,6 +655,8 @@ public class MTDataFragment extends Fragment {
     }
 
     private void saveDataToFile() {
+        Log.d(TAG, "▶▶▶ saveDataToFile() CALLED");
+
         try {
             Log.d(TAG, "=== SAVING DATA TO FILE ===");
             Log.d(TAG, "receivedData.size(): " + receivedData.size());
@@ -657,10 +702,9 @@ public class MTDataFragment extends Fragment {
                 Log.d(TAG, "Overwrite mode: using dataStartTime " + new Date(startTime));
             }
 
+            Log.d(TAG, "About to call saveMTData...");
             MTDeviceDataHelper.saveMTData(requireContext(), deviceName, deviceAddress,
                     values, startTime, appendMode);
-
-            Log.d(TAG, "Data saved successfully");
 
             String message = appendMode ?
                     "Добавлено " + receivedData.size() + " точек" :
@@ -669,6 +713,7 @@ public class MTDataFragment extends Fragment {
             Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
             statusTextView.setText(appendMode ? "Данные добавлены" : "Данные сохранены");
 
+            // Только обновление графика и переключение вкладки
             MTDeviceActivity activity = (MTDeviceActivity) getActivity();
             if (activity != null) {
                 MTDeviceActivity.MTPagerAdapter adapter = activity.getPagerAdapter();
@@ -691,5 +736,4 @@ public class MTDataFragment extends Fragment {
                     Toast.LENGTH_LONG).show();
         }
     }
-    //
 }

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Bluetooth Data Monitor</string>
+    <string name="app_name">GGK Bluetooth</string>
 
     <!-- Main Activity -->
     <string name="tab_available_devices">Доступные устройства</string>
