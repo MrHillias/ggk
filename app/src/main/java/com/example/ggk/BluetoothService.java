@@ -646,7 +646,6 @@ public class BluetoothService {
                 if (service != null) {
                     // ВАЖНО: Всегда ищем write характеристику для MT устройств
                     if (currentWriteCharacteristicUuid == null && currentCharacteristicUuid != null) {
-                        // Если подключаемся для чтения (connect), автоматически ищем запись
                         UUID autoWriteUuid = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb");
                         BluetoothGattCharacteristic writeChar = service.getCharacteristic(autoWriteUuid);
                         if (writeChar != null) {
@@ -654,10 +653,10 @@ public class BluetoothService {
                             Log.d(TAG, "✓ Auto-found write characteristic for MT device");
                         }
                     }
+
                     if (currentWriteCharacteristicUuid != null) {
                         writeCharacteristic = null;
 
-                        // ВАЖНО: Сначала ищем ТОЧНО указанную характеристику
                         Log.d(TAG, "Looking for SPECIFIC write characteristic: " + currentWriteCharacteristicUuid);
 
                         for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
@@ -670,36 +669,29 @@ public class BluetoothService {
                                     ", Read=" + ((properties & BluetoothGattCharacteristic.PROPERTY_READ) != 0) +
                                     ", Notify=" + ((properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0));
 
-                            // Проверяем, является ли это нужной характеристикой
                             if (uuid.equals(currentWriteCharacteristicUuid)) {
                                 if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
                                         (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
                                     writeCharacteristic = characteristic;
                                     Log.d(TAG, "✓ Found SPECIFIED write characteristic: " + uuid);
                                     break;
-                                } else {
-                                    Log.w(TAG, "✗ Specified characteristic " + uuid + " does NOT support write!");
-                                }
-                            }
-                        }
-
-                        // Если не нашли указанную, ищем любую подходящую
-                        if (writeCharacteristic == null) {
-                            Log.w(TAG, "Specified write characteristic not found, searching for ANY writable characteristic...");
-                            for (BluetoothGattCharacteristic characteristic : service.getCharacteristics()) {
-                                UUID uuid = characteristic.getUuid();
-                                int properties = characteristic.getProperties();
-
-                                if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0 ||
-                                        (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
-                                    writeCharacteristic = characteristic;
-                                    Log.d(TAG, "✓ Found ALTERNATIVE write characteristic: " + uuid);
-                                    break;
                                 }
                             }
                         }
 
                         if (writeCharacteristic != null) {
+                            // ✅ КРИТИЧНО: Включаем notifications на read характеристику!
+                            if (currentCharacteristicUuid != null) {
+                                BluetoothGattCharacteristic readChar = service.getCharacteristic(currentCharacteristicUuid);
+                                if (readChar != null) {
+                                    Log.d(TAG, "Enabling notifications on read characteristic: " + currentCharacteristicUuid);
+                                    boolean notifSuccess = enableNotifications(gatt, readChar);
+                                    Log.d(TAG, "Notifications enabled: " + notifSuccess);
+                                } else {
+                                    Log.e(TAG, "Read characteristic not found: " + currentCharacteristicUuid);
+                                }
+                            }
+
                             servicesDiscovered.set(true);
                             notifyServicesDiscovered(true);
                         } else {
@@ -707,6 +699,7 @@ public class BluetoothService {
                             handleConnectionFailure("No write characteristic found");
                         }
                     } else {
+                        // Режим только чтения
                         BluetoothGattCharacteristic characteristic = service.getCharacteristic(currentCharacteristicUuid);
                         if (characteristic != null) {
                             boolean success = enableNotifications(gatt, characteristic);

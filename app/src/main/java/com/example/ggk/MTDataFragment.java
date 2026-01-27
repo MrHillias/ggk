@@ -663,7 +663,6 @@ public class MTDataFragment extends Fragment {
         mainHandler.post(() -> {
             Log.d(TAG, "=== processReceivedData ===");
             Log.d(TAG, "Current receivedData.size BEFORE processing: " + receivedData.size());
-            Log.d(TAG, "Pending byte from previous chunk: " + pendingByte);
 
             dataBuffer.append(data);
 
@@ -692,30 +691,84 @@ public class MTDataFragment extends Fragment {
 
             Log.d(TAG, "Extracted " + byteValues.size() + " byte values from this chunk");
 
+            // Сохраняем непарный байт для следующего чанка
             if (byteValues.size() % 2 == 1) {
                 pendingByte = byteValues.remove(byteValues.size() - 1);
                 Log.d(TAG, "Saved last byte for next chunk: " + pendingByte);
             }
 
-            if (byteValues.size() >= 20) {
-                StringBuilder lastBytes = new StringBuilder("Last 20 bytes: ");
-                for (int i = byteValues.size() - 20; i < byteValues.size(); i++) {
-                    lastBytes.append(byteValues.get(i)).append(" ");
+            // ✅ НОВАЯ ЛОГИКА: Пропускаем мусор в начале
+            int startIndex = 0;
+
+            // Только для первых данных (когда receivedData пуст)
+            if (receivedData.isEmpty() && byteValues.size() >= 2) {
+                Log.d(TAG, "🔍 First chunk - searching for valid data start...");
+
+                // Ищем первую валидную пару
+                for (int i = 0; i < byteValues.size() - 1; i += 2) {
+                    int lowByte = byteValues.get(i);
+                    int highByte = byteValues.get(i + 1);
+                    short signedValue = (short)((highByte << 8) | lowByte);
+
+                    // Валидное значение давления: от -5000 до +10000
+                    boolean isValid = (signedValue >= -5000 && signedValue <= 10000);
+
+                    if (isValid) {
+                        startIndex = i;
+                        Log.d(TAG, "✅ Found valid data start at byte index " + i);
+                        Log.d(TAG, "   First valid value: " + signedValue);
+
+                        if (i > 0) {
+                            // Показываем что пропустили
+                            List<Integer> skipped = byteValues.subList(0, i);
+                            Log.w(TAG, "⚠️ Skipped " + i + " bytes of garbage: " + skipped);
+
+                            // Пытаемся декодировать как текст
+                            StringBuilder skippedText = new StringBuilder("   As text: [");
+                            for (int b : skipped) {
+                                if (b >= 32 && b <= 126) {
+                                    skippedText.append((char)b);
+                                } else if (b == 13) {
+                                    skippedText.append("\\r");
+                                } else if (b == 10) {
+                                    skippedText.append("\\n");
+                                } else {
+                                    skippedText.append("?");
+                                }
+                            }
+                            skippedText.append("]");
+                            Log.w(TAG, skippedText.toString());
+                        }
+                        break;
+                    }
                 }
-                Log.d(TAG, lastBytes.toString());
+
+                // Если не нашли валидное значение во всём чанке
+                if (startIndex == 0 && byteValues.size() >= 2) {
+                    int lowByte = byteValues.get(0);
+                    int highByte = byteValues.get(1);
+                    short firstValue = (short)((highByte << 8) | lowByte);
+
+                    // Если первое значение явно мусор (> 25000)
+                    if (Math.abs(firstValue) > 25000) {
+                        Log.e(TAG, "❌ No valid data found in first chunk! First value: " + firstValue);
+                        Log.e(TAG, "   This chunk appears to be all garbage. Waiting for next chunk...");
+                        return; // Не обрабатываем этот чанк совсем
+                    }
+                }
             }
 
             int beforeSize = receivedData.size();
             int anomalyCount = 0;
 
-            for (int i = 0; i < byteValues.size() - 1; i += 2) {
+            // Обрабатываем пары, начиная с найденного индекса
+            for (int i = startIndex; i < byteValues.size() - 1; i += 2) {
                 int lowByte = byteValues.get(i);
                 int highByte = byteValues.get(i + 1);
 
                 short signedValue = (short)((highByte << 8) | lowByte);
 
-                // КРИТИЧНО: Фильтруем аномальные значения
-                // Паттерн: lowByte = 0x00 и |value| > 1000 = явный мусор
+                // Фильтруем аномальные значения
                 boolean isAnomaly = (lowByte == 0 && Math.abs(signedValue) > 1000);
 
                 if (isAnomaly) {
@@ -727,14 +780,10 @@ public class MTDataFragment extends Fragment {
 
                 receivedData.add((double)signedValue);
 
+                // Логируем первые 5 значений после старта
                 if (receivedData.size() <= 5) {
-                    Log.d(TAG, String.format("Pair: [%3d, %3d] -> int16: %6d",
-                            lowByte, highByte, signedValue));
-                }
-
-                if (i >= byteValues.size() - 20 && i < byteValues.size() - 1) {
-                    Log.d(TAG, String.format("LAST Pair %d: [%3d, %3d] -> int16: %6d",
-                            i/2, lowByte, highByte, signedValue));
+                    Log.d(TAG, String.format("Value #%d: [%3d, %3d] -> %6d",
+                            receivedData.size(), lowByte, highByte, signedValue));
                 }
             }
 
